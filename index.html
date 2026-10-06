@@ -692,11 +692,26 @@ function inBox(c, x, y, pad = 8) { // point dans le cadre de la cellule (marge c
   const s = scaleOf(c), [l, r, t, b] = c.ext;
   return x >= c.x - l * s - pad && x <= c.x + r * s + pad && y >= c.y - t * s - pad && y <= c.y + b * s + pad;
 }
+function simplify(P, eps) { // Douglas-Peucker : garde les vrais changements de direction, efface le bruit
+  if (P.length < 3) return P.slice();
+  const keep = new Uint8Array(P.length), stack = [[0, P.length - 1]];
+  keep[0] = keep[P.length - 1] = 1;
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    let im = -1, dm = eps;
+    for (let i = a + 1; i < b; i++) { const d = segDist(P[i], P[a], P[b]); if (d > dm) { dm = d; im = i; } }
+    if (im >= 0) { keep[im] = 1; stack.push([a, im], [im, b]); }
+  }
+  return P.filter((_, i) => keep[i]);
+}
 function strokeInfo(raw) {
+  // un trait lent au stylet ou au doigt arrive en points serrés et légèrement bruités : on le simplifie
+  // avant de mesurer, sinon le bruit gonfle sa longueur et il ne paraît plus droit
+  const P = simplify(raw, 6);
   let L = 0;
-  for (let i = 1; i < raw.length; i++) L += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]);
-  if (raw.length < 2 || L < 24) return null;
-  const S = resample(raw, clamp(Math.round(L / 8), 8, 200)).pts, n = S.length;
+  for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+  if (P.length < 2 || L < 24) return null;
+  const S = resample(P, clamp(Math.round(L / 8), 8, 200)).pts, n = S.length;
   const chord = Math.hypot(S[n - 1][0] - S[0][0], S[n - 1][1] - S[0][1]);
   let best = null, bi = 0;
   for (const c of cells) {

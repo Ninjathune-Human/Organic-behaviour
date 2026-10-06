@@ -148,7 +148,7 @@ html, body { overscroll-behavior: none; }
     <li><b>Dessiner</b> un rond, un rectangle ou un triangle crée une cellule.</li>
     <li><b>Glisser l’intérieur</b> la déplace ; un lien presque droit l’aimante.</li>
     <li><b>Tirer le bord</b> vers une autre cellule en fait sa fille.</li>
-    <li><b>Barrer</b> un lien le coupe.</li>
+    <li><b>Barrer</b> un lien le coupe ; <b>une croix ou une rature</b> sur une cellule la supprime.</li>
     <li><b>Toucher une mère</b> allume sa lignée ; <b>toucher son encoche</b> replie ou déplie ses filles.</li>
     <li><b>Appui long</b>, puis sur une autre cellule : elle prend sa taille.</li>
   </ul></div></div>
@@ -384,6 +384,7 @@ function stepCell(c, h) {
 }
 function cellBusy(c, t) {
   if (c.hidden) return false;
+  if (c.dying) return true;
   if (c.fold) return true;
   if (c.budT0 && t - c.budT0 < .4) return true;
   if (c.selected && !reduce) return true;
@@ -398,7 +399,7 @@ function cellBusy(c, t) {
 }
 
 /* ---------- Zones : intérieur (déplacer) et bord (relier) ---------- */
-const active = c => !c.hidden && !c.fold; // visible et immobile : on peut la toucher
+const active = c => !c.hidden && !c.fold && !c.dying; // visible et immobile : on peut la toucher
 function zoneOf(x, y) {
   const t = now();
   for (let k = cells.length - 1; k >= 0; k--) { // l'encoche d'une mère, zone de 44 px
@@ -672,13 +673,83 @@ function regularize(T) { // base presque horizontale et sommet presque centré :
   if (Math.abs(c[0] - mid) < .12 * Math.abs(b[0] - a[0])) c[0] = mid;
   return [a, b, c];
 }
+/* ---------- Supprimer une cellule : une croix ou une rature dessinée par-dessus ----------
+   Croix : deux traits droits qui se coupent sur la cellule, le second commencé moins de 1,5 s après le premier.
+   Rature : un trait en zigzag (au moins trois demi-tours) qui couvre la cellule.
+   Comme pour tout dessin, les traits commencent sur le fond. */
+function uTurns(S) { // demi-tours du trait (cap qui change de plus de 140°)
+  let n = 0;
+  for (let i = 2; i < S.length - 2; i++) {
+    const a = Math.atan2(S[i][1] - S[i - 2][1], S[i][0] - S[i - 2][0]), b = Math.atan2(S[i + 2][1] - S[i][1], S[i + 2][0] - S[i][0]);
+    if (Math.abs(angDist(b, a)) > 140 * Math.PI / 180) { n++; i += 3; }
+  }
+  return n;
+}
+function cellSpan(c) { return (c.ext[0] + c.ext[1] + c.ext[2] + c.ext[3]) / 2 * scaleOf(c); } // taille moyenne (largeur + hauteur) / 2
+function inside(c, x, y, t) {
+  const a = Math.atan2(y - c.y, x - c.x), P = pointAtAngle(c, a, t);
+  return Math.hypot(x - c.x, y - c.y) <= Math.hypot(P.x - c.x, P.y - c.y);
+}
+function strokeInfo(raw) {
+  let L = 0;
+  for (let i = 1; i < raw.length; i++) L += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]);
+  if (raw.length < 2 || L < 24) return null;
+  const S = resample(raw, clamp(Math.round(L / 8), 8, 200)).pts, t = now(), n = S.length;
+  const chord = Math.hypot(S[n - 1][0] - S[0][0], S[n - 1][1] - S[0][1]);
+  let best = null, bi = 0;
+  for (const c of cells) {
+    if (!active(c)) continue;
+    let inLen = 0;
+    for (let i = 1; i < n; i++) if (inside(c, (S[i][0] + S[i - 1][0]) / 2, (S[i][1] + S[i - 1][1]) / 2, t)) inLen += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]);
+    if (inLen > bi) { bi = inLen; best = c; }
+  }
+  return { S, L, straight: chord / L, turns: uTurns(S), cell: best, inLen: bi };
+}
+const isScribble = k => k && k.cell && k.turns >= 3 && k.inLen >= 1.5 * cellSpan(k.cell) && k.inLen >= .5 * k.L;
+const isBar = k => k && k.cell && k.straight >= .85 && k.inLen >= .5 * cellSpan(k.cell); // trait droit qui traverse une cellule
+function crossesAsX(a, b) { // deux traits droits qui se coupent sur la même cellule, franchement inclinés l'un sur l'autre
+  if (!isBar(a) || !isBar(b) || a.cell !== b.cell) return false;
+  const A0 = a.S[0], A1 = a.S[a.S.length - 1], B0 = b.S[0], B1 = b.S[b.S.length - 1], k = crossing(A0, A1, B0, B1);
+  if (!k) return false;
+  const x = A0[0] + (A1[0] - A0[0]) * k.t, y = A0[1] + (A1[1] - A0[1]) * k.t;
+  const ang = Math.abs(angDist(Math.atan2(A1[1] - A0[1], A1[0] - A0[0]), Math.atan2(B1[1] - B0[1], B1[0] - B0[0]))) % Math.PI;
+  return inside(a.cell, x, y, now()) && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
+}
+function deleteCell(c, t) { // apoptose : la cellule se contracte et s'efface, ses liens reviennent chez les survivantes
+  if (c.dying) return;
+  if (focused === c) focus(null);
+  if (source === c) select(null);
+  if (c.folded) { // filles rangées dans son bourgeon : elles ressortent à leur place avant qu'elle disparaisse
+    c.folded = false;
+    for (const [d, , l] of visibleChildren(c)) {
+      if (!d.hidden) continue;
+      d.hidden = false; d.fold = null; d.fs = 1; d.x = l.a.x + d.rel[0]; d.y = l.a.y + d.rel[1];
+      d.px = d.x; d.py = d.y; d.pvx = d.pvy = 0; d.scale = reduce ? 1 : 0; d.sv = 0; l.T = null; l.key = '';
+    }
+  }
+  for (const l of links.filter(l => l.a === c || l.b === c)) {
+    const keep = l.a === c ? l.b : l.a, P = l._poly;
+    removeLink(l);
+    if (keep === l.b) passHue(keep, keep.native, t + .2); // orpheline : elle retrouve sa teinte propre
+    if (!P || keep.hidden) continue;
+    const pts = l.a === c ? P.slice().reverse() : P.slice(); // de la survivante vers la cellule qui disparaît
+    const h = makeRope(keep, pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    h.retract = true;
+    resample(pts, M).pts.forEach(([x, y], i) => { h.p[2 * i] = x; h.p[2 * i + 1] = y; });
+  }
+  if (focused) relight();
+  c.dying = t; c.selected = false; c.vib = t; c.vibAmp = 3.5;
+  if (!reduce) for (let i = 0; i < c.n; i++) c.vel[i] += (Math.random() - .5) * 260; // dernier sursaut
+  if (navigator.vibrate) navigator.vibrate(12);
+  needsRoute = true; wake();
+}
 function classify(raw) { // forme fermée, puis le modèle (ellipse, rectangle ou triangle) qui colle le mieux au tracé
   if (raw.length < 8) return null;
   const { pts: S, length } = resample(raw, 96);
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of S) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
   const w = x1 - x0, h = y1 - y0;
-  if (Math.min(w, h) < 36) return null;
+  if (Math.min(w, h) < 36 || uTurns(S) >= 3) return null; // une rature n'est pas une forme
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = w / 2, hh = h / 2;
   // fermée : les deux bouts se rejoignent, ou le trait fait le tour complet du centre (même en dépassant)
   const gap = Math.hypot(S[0][0] - S[S.length - 1][0], S[0][1] - S[S.length - 1][1]);
@@ -803,7 +874,7 @@ function sync() { // aligne le routeur sur la scène ; vrai si quelque chose a c
   let changed = false;
   for (const l of links) if (l.conn && (l.a.hidden || l.b.hidden)) { router.deleteConnector(l.conn); l.conn = null; l.pts = null; l.key = ''; changed = true; }
   for (const c of cells) {
-    if (c.hidden) { if (c.shape) { router.deleteShape(c.shape); c.shape = null; c.rect = null; changed = true; } continue; }
+    if (c.hidden || c.dying) { if (c.shape) { router.deleteShape(c.shape); c.shape = null; c.rect = null; changed = true; } continue; }
     if (!c.shape) { addShape(c); changed = true; continue; }
     const R = obstacleRect(c), o = c.rect;
     if (Math.abs(R.w - o.w) > .25 || Math.abs(R.h - o.h) > .25) { const Q = rectangle(R); router.moveShape_poly(c.shape, Q, false); Q.delete(); }
@@ -1242,8 +1313,13 @@ function step(dt, t) {
   }
   const springs = stepSprings(dt);
   if (router && !deferred && (sync() || needsRoute)) route(); // le routage suit la scène, sauf s'il est trop lent pendant un glissement
-  const inkBusy = ink && (!ink.fade || t - ink.fade < .35);
-  if (ink && ink.fade && !inkBusy) ink = null;
+  for (const c of cells.slice()) if (c.dying) { // la cellule se contracte, puis disparaît
+    const p = (t - c.dying) / .45;
+    if (p >= 1 || reduce) { if (c.shape) { router.deleteShape(c.shape); c.shape = null; } cells.splice(cells.indexOf(c), 1); continue; }
+    c.fs = 1 - .95 * p * p;
+  }
+  for (let i = ghosts.length - 1; i >= 0; i--) if (t - ghosts[i].fade >= .35) ghosts.splice(i, 1);
+  const inkBusy = !!ink || ghosts.length > 0 || !!pending;
   return !!gesture || inkBusy || magOn || springs || ropes.length > 0 || needsRoute ||
          cells.some(c => cellBusy(c, t) || c.ax || c.ay) || links.some(l => linkBusy(l, t));
 }
@@ -1354,6 +1430,7 @@ function draw(t) {
   ctx.globalAlpha = 1;
   for (const c of cells) {
     if (c.scale < .01 || c.hidden) continue;
+    ctx.globalAlpha = c.dying ? Math.max(0, 1 - (t - c.dying) / .45) : 1; // une cellule qui disparaît s'estompe
     if (c.halo) { // halo de symbiose autour de la membrane
       const gl = envelope(t - c.halo, .18, .45);
       if (gl > .01) {
@@ -1386,11 +1463,12 @@ function draw(t) {
     ctx.fillStyle = `rgba(${tc[0] | 0},${tc[1] | 0},${tc[2] | 0},.55)`; ctx.fill();
     drawEncoche(c, t, tc);
   }
-  if (ink && ink.pts.length > 1) { // trait en cours, ou qui s'efface si la forme n'est pas reconnue
+  for (const k of [...ghosts, pending && pending.ink, ink]) { // traits : en cours, en attente, ou qui s'effacent
+    if (!k || k.pts.length < 2) continue;
     ctx.save();
-    ctx.globalAlpha = ink.fade ? Math.max(0, 1 - (t - ink.fade) / .35) : .85;
+    ctx.globalAlpha = k.fade ? Math.max(0, 1 - (t - k.fade) / .35) : .85;
     ctx.strokeStyle = colors.wire; ctx.lineWidth = 2;
-    strokeCurve(ink.pts);
+    strokeCurve(k.pts);
     ctx.restore();
   }
 }
@@ -1408,6 +1486,15 @@ function frame(ms) {
 }
 
 /* ---------- Gestes ---------- */
+let pending = null;        // premier trait d'une croix possible, en attente du second
+const ghosts = [];         // traits qui s'effacent
+function fadeInk(k, t) { if (k) { k.fade = t; ghosts.push(k); } if (k === ink) ink = null; }
+function endPending(apply) { // sans second trait : le premier coupe les liens qu'il a barrés, comme d'habitude
+  const p = pending; if (!p) return;
+  pending = null; clearTimeout(p.timer);
+  for (const l of p.links) if (links.includes(l) && l.cut) apply ? sever(l) : (l.cut = null);
+  fadeInk(p.ink, now());
+}
 const LONG_PRESS = .45;   // appui long (s) : la cellule tremble et devient la source de taille
 let source = null;
 function select(c) { if (source) source.selected = false; source = c; if (c) c.selected = true; wake(); }
@@ -1435,6 +1522,7 @@ cv.addEventListener('pointerdown', e => {
     if (focused) focus(null);              // et éteint la descendance allumée
     gesture = { kind: 'draw', id: e.pointerId };
     ink = { pts: [[x, y]], fade: null };
+    if (pending) clearTimeout(pending.timer);  // le second trait a commencé à temps : on le laisse finir
   }
   if (z) { const g = gesture; g.press = setTimeout(() => longPress(g), LONG_PRESS * 1000); }
   wake();
@@ -1496,12 +1584,23 @@ function endGesture(e, accept) {
   }
   if (tap && accept) { focus(focused === g.cell ? null : g.cell); return; } // appui court : la cellule et sa descendance s'allument
   if (g.kind === 'draw') {
-    if (accept && cellFromStroke(ink.pts)) { ink = null; for (const l of links) l.cut = null; }
-    else {
-      ink.fade = t;
-      const cut = links.filter(l => l.cut);
-      for (const l of cut) accept ? sever(l) : (l.cut = null);
-      if (accept && cut.length && navigator.vibrate) navigator.vibrate(6);
+    const k = accept ? strokeInfo(ink.pts) : null, ours = links.filter(l => l.cut && !(pending && pending.links.includes(l)));
+    if (pending && k && crossesAsX(pending.k, k)) { // second trait de la croix : la cellule disparaît, les liens barrés restent
+      const p = pending; endPending(false);
+      for (const l of ours) l.cut = null;
+      fadeInk(ink, t); deleteCell(p.k.cell, t);
+    } else {
+      if (pending) endPending(true);                 // pas de croix : le premier trait reprend son sens habituel
+      if (isScribble(k)) { for (const l of ours) l.cut = null; fadeInk(ink, t); deleteCell(k.cell, t); }
+      else if (accept && cellFromStroke(ink.pts)) { ink = null; for (const l of ours) l.cut = null; }
+      else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
+        pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 1500) };
+        ink = null;
+      } else {
+        fadeInk(ink, t);
+        for (const l of ours) accept ? sever(l) : (l.cut = null);
+        if (accept && ours.length && navigator.vibrate) navigator.vibrate(6);
+      }
     }
   } else if (g.kind === 'move') {
     cv.style.cursor = e.pointerType === 'touch' ? '' : 'grab';
@@ -1589,7 +1688,7 @@ resize(); readColors();
   makeCell(cx, Math.min(Hh - 70, cy + 170), { kind: 'tri', verts: [[0, -61.3], [60, 30.7], [-60, 30.7]] });
   wake();
 })();
-window.__lab = { cells, links, ropes, opt, classify, zoneOf, encoche, motherOf, descendants, toggleFold,
+window.__lab = { cells, links, ropes, opt, classify, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; },
                  get gesture() { return gesture; }, get focused() { return focused; }, get source() { return source; }, get idle() { return !raf; } };
 
 /* ---------- Plein écran ----------

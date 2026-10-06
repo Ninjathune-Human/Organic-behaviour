@@ -674,9 +674,11 @@ function regularize(T) { // base presque horizontale et sommet presque centré :
   return [a, b, c];
 }
 /* ---------- Supprimer une cellule : une croix ou une rature dessinée par-dessus ----------
-   Croix : deux traits droits qui se coupent sur la cellule, le second commencé moins de 1,5 s après le premier.
+   Croix : deux traits droits qui se coupent sur la cellule, le second commencé moins de 3 s après le premier.
    Rature : un trait en zigzag (au moins trois demi-tours) qui couvre la cellule.
-   Comme pour tout dessin, les traits commencent sur le fond. */
+   On mesure sur le cadre de la cellule et non sur sa membrane : un triangle laisse vides les coins de son
+   cadre, et une croix ou une rature tracée par-dessus y passe forcément.
+   Le premier trait commence sur le fond ; pendant l'attente, le second peut aussi partir de la cellule visée. */
 function uTurns(S) { // demi-tours du trait (cap qui change de plus de 140°)
   let n = 0;
   for (let i = 2; i < S.length - 2; i++) {
@@ -686,21 +688,21 @@ function uTurns(S) { // demi-tours du trait (cap qui change de plus de 140°)
   return n;
 }
 function cellSpan(c) { return (c.ext[0] + c.ext[1] + c.ext[2] + c.ext[3]) / 2 * scaleOf(c); } // taille moyenne (largeur + hauteur) / 2
-function inside(c, x, y, t) {
-  const a = Math.atan2(y - c.y, x - c.x), P = pointAtAngle(c, a, t);
-  return Math.hypot(x - c.x, y - c.y) <= Math.hypot(P.x - c.x, P.y - c.y);
+function inBox(c, x, y, pad = 8) { // point dans le cadre de la cellule (marge comprise)
+  const s = scaleOf(c), [l, r, t, b] = c.ext;
+  return x >= c.x - l * s - pad && x <= c.x + r * s + pad && y >= c.y - t * s - pad && y <= c.y + b * s + pad;
 }
 function strokeInfo(raw) {
   let L = 0;
   for (let i = 1; i < raw.length; i++) L += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]);
   if (raw.length < 2 || L < 24) return null;
-  const S = resample(raw, clamp(Math.round(L / 8), 8, 200)).pts, t = now(), n = S.length;
+  const S = resample(raw, clamp(Math.round(L / 8), 8, 200)).pts, n = S.length;
   const chord = Math.hypot(S[n - 1][0] - S[0][0], S[n - 1][1] - S[0][1]);
   let best = null, bi = 0;
   for (const c of cells) {
     if (!active(c)) continue;
     let inLen = 0;
-    for (let i = 1; i < n; i++) if (inside(c, (S[i][0] + S[i - 1][0]) / 2, (S[i][1] + S[i - 1][1]) / 2, t)) inLen += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]);
+    for (let i = 1; i < n; i++) if (inBox(c, (S[i][0] + S[i - 1][0]) / 2, (S[i][1] + S[i - 1][1]) / 2)) inLen += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]);
     if (inLen > bi) { bi = inLen; best = c; }
   }
   return { S, L, straight: chord / L, turns: uTurns(S), cell: best, inLen: bi };
@@ -713,7 +715,7 @@ function crossesAsX(a, b) { // deux traits droits qui se coupent sur la même ce
   if (!k) return false;
   const x = A0[0] + (A1[0] - A0[0]) * k.t, y = A0[1] + (A1[1] - A0[1]) * k.t;
   const ang = Math.abs(angDist(Math.atan2(A1[1] - A0[1], A1[0] - A0[0]), Math.atan2(B1[1] - B0[1], B1[0] - B0[0]))) % Math.PI;
-  return inside(a.cell, x, y, now()) && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
+  return inBox(a.cell, x, y, 0) && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
 }
 function deleteCell(c, t) { // apoptose : la cellule se contracte et s'efface, ses liens reviennent chez les survivantes
   if (c.dying) return;
@@ -1508,7 +1510,9 @@ function longPress(g) {
 const barBottom = () => document.getElementById('bar').getBoundingClientRect().bottom;
 cv.addEventListener('pointerdown', e => {
   if (gesture) return;
-  const x = e.clientX, y = e.clientY, z = zoneOf(x, y);
+  const x = e.clientX, y = e.clientY;
+  // croix en attente : un appui sur la cellule visée commence le second trait au lieu de la déplacer ou de la relier
+  const z = pending && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
   cv.setPointerCapture(e.pointerId);
   hover = null;
   if (z && z.part === 'body') {
@@ -1594,7 +1598,7 @@ function endGesture(e, accept) {
       if (isScribble(k)) { for (const l of ours) l.cut = null; fadeInk(ink, t); deleteCell(k.cell, t); }
       else if (accept && cellFromStroke(ink.pts)) { ink = null; for (const l of ours) l.cut = null; }
       else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
-        pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 1500) };
+        pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
         ink = null;
       } else {
         fadeInk(ink, t);

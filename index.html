@@ -145,7 +145,7 @@ html, body { overscroll-behavior: none; }
     </div>
   </div>
   <div class="help" id="help" data-open="false"><div><ul>
-    <li><b>Dessiner</b> une forme crée une cellule : rond, ovale, rectangle, triangle, losange, pentagone, hexagone, octogone, étoile ou nuage.</li>
+    <li><b>Dessiner</b> une forme crée une cellule : rond, ovale, rectangle, triangle, losange, pentagone, hexagone, octogone, étoile, nuage ou flèche (en contour, ou d’un geste : la hampe puis la pointe).</li>
     <li><b>Glisser l’intérieur</b> la déplace ; un lien presque droit l’aimante.</li>
     <li><b>Tirer le bord</b> vers une autre cellule en fait sa fille.</li>
     <li><b>Barrer</b> un lien le coupe ; <b>une croix ou une rature</b> sur une cellule la supprime.</li>
@@ -308,7 +308,17 @@ function buildOutline(c, dense) { // contour donné point par point (angles croi
   for (let i = 0; i < n; i++) { const [x, y, nx, ny, a] = P[(first + i) % n]; c.bx[i] = x; c.by[i] = y; c.nx[i] = nx; c.ny[i] = ny; c.ang[i] = a; }
   measure(c);
 }
-function buildShape(c) { // formes à sommets (triangle, polygones, étoile), ovale, nuage, puis rond et rectangle
+function arrowLocal(L, headW, shaftW, H) { // flèche pleine pointant vers +x, centrée sur le milieu de la hampe et de la pointe
+  const j = L / 2 - H, hw = headW / 2, t = shaftW / 2;
+  return [[-L / 2, t], [j, t], [j, hw], [L / 2, 0], [j, -hw], [j, -t], [-L / 2, -t]];
+}
+const arrowCore = c => c.L / 2 - .8 * c.H; // centre de la cellule : sur l'axe, juste derrière la tête, d'où tout le contour est visible
+function arrowVerts(c) {
+  const ox = arrowCore(c), C = Math.cos(c.th), S = Math.sin(c.th);
+  return arrowLocal(c.L, c.headW, c.shaftW, c.H).map(([x, y]) => { x -= ox; return [x * C - y * S, x * S + y * C]; });
+}
+function buildShape(c) { // formes à sommets (triangle, polygones, étoile, flèche), ovale, nuage, puis rond et rectangle
+  if (c.kind === 'arrow') c.verts = arrowVerts(c);
   if (c.verts) return buildTri(c);
   if (c.kind === 'oval') return buildOutline(c, ellipseDense(c.w / 2, c.h / 2));
   if (c.kind === 'cloud') return buildOutline(c, cloudDense(c.w, c.h, c.k, c.ph));
@@ -702,17 +712,50 @@ function segDist(p, a, b) {
   const u = L ? clamp(((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L, 0, 1) : 0;
   return Math.hypot(p[0] - a[0] - u * vx, p[1] - a[1] - u * vy);
 }
-function regularize(T) { // base presque horizontale et sommet presque centré : triangle isocèle net
-  let e = 0, best = Infinity;
+/* ---------- Formes standard ----------
+   Comme dans un logiciel de dessin, un tracé proche d'une forme standard devient cette forme :
+   triangle équilatéral, rectangle ou isocèle, carré, losange carré, polygones et étoile réguliers
+   (homothétiques : mêmes proportions quelle que soit la taille), orientation droite si elle l'est presque. */
+const DEG = Math.PI / 180;
+const snapAxis = (a, tol = 10) => { const s = Math.round(a / (Math.PI / 2)) * Math.PI / 2; return Math.abs(angDist(a, s)) < tol * DEG ? s : a; };
+function regularize(T) {
+  const d = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const side = i => d(T[(i + 1) % 3], T[(i + 2) % 3]);                 // côté opposé au sommet i
+  const angle = i => { const a = T[i], b = T[(i + 1) % 3], c = T[(i + 2) % 3]; return Math.acos(clamp(((b[0] - a[0]) * (c[0] - a[0]) + (b[1] - a[1]) * (c[1] - a[1])) / (d(a, b) * d(a, c)), -1, 1)); };
+  const S = [0, 1, 2].map(side), A = [0, 1, 2].map(angle);
+  const G = [(T[0][0] + T[1][0] + T[2][0]) / 3, (T[0][1] + T[1][1] + T[2][1]) / 3];
+  if (Math.max(...S) / Math.min(...S) < 1.12) { // équilatéral : un sommet en haut s'il l'est presque
+    const R = (d(G, T[0]) + d(G, T[1]) + d(G, T[2])) / 3;
+    let a0 = Math.atan2(T[0][1] - G[1], T[0][0] - G[0]);
+    for (let i = 0; i < 3; i++) { const ai = a0 + i * TAU / 3; for (const target of [-Math.PI / 2, Math.PI / 2]) if (Math.abs(angDist(ai, target)) < 12 * DEG) a0 += angDist(target, ai); }
+    return [0, 1, 2].map(i => [G[0] + R * Math.cos(a0 + i * TAU / 3), G[1] + R * Math.sin(a0 + i * TAU / 3)]);
+  }
+  const r = A.findIndex(a => Math.abs(a - Math.PI / 2) < 8 * DEG);
+  if (r >= 0) { // rectangle : angle droit exact, côtés de l'angle droit à l'horizontale et à la verticale s'ils le sont presque
+    const V = T[r], P = T[(r + 1) % 3], Q = T[(r + 2) % 3];
+    let lp = d(V, P), lq = d(V, Q);
+    if (Math.max(lp, lq) / Math.min(lp, lq) < 1.12) lp = lq = (lp + lq) / 2; // rectangle isocèle
+    const ap = Math.atan2(P[1] - V[1], P[0] - V[0]), aq = Math.atan2(Q[1] - V[1], Q[0] - V[0]), turn = Math.sign(angDist(aq, ap));
+    const mid = ap + angDist(aq, ap) / 2, a1 = snapAxis(mid - turn * Math.PI / 4);
+    return [V, [V[0] + lp * Math.cos(a1), V[1] + lp * Math.sin(a1)], [V[0] + lq * Math.cos(a1 + turn * Math.PI / 2), V[1] + lq * Math.sin(a1 + turn * Math.PI / 2)]];
+  }
+  for (let i = 0; i < 3; i++) { // isocèle : sommet principal i, base symétrique, axe droit s'il l'est presque
+    const s1 = S[(i + 1) % 3], s2 = S[(i + 2) % 3];
+    if (Math.max(s1, s2) / Math.min(s1, s2) >= 1.12) continue;
+    const B1 = T[(i + 1) % 3], B2 = T[(i + 2) % 3], M = [(B1[0] + B2[0]) / 2, (B1[1] + B2[1]) / 2];
+    const hgt = d(M, T[i]), half = d(B1, B2) / 2, ax = snapAxis(Math.atan2(T[i][1] - M[1], T[i][0] - M[0]));
+    const nx = -Math.sin(ax), ny = Math.cos(ax);
+    return [[M[0] + Math.cos(ax) * hgt, M[1] + Math.sin(ax) * hgt], [M[0] + nx * half, M[1] + ny * half], [M[0] - nx * half, M[1] - ny * half]];
+  }
+  let e = 0, best = Infinity; // quelconque : on ne redresse que la base, si elle est presque horizontale
   for (let k = 0; k < 3; k++) {
     const a = T[k], b = T[(k + 1) % 3], ang = Math.abs(Math.atan2(b[1] - a[1], b[0] - a[0]));
     const tilt = Math.min(ang, Math.PI - ang);
     if (tilt < best) { best = tilt; e = k; }
   }
-  if (best > 10 * Math.PI / 180) return T;
-  const a = T[e].slice(), b = T[(e + 1) % 3].slice(), c = T[(e + 2) % 3].slice(), y = (a[1] + b[1]) / 2, mid = (a[0] + b[0]) / 2;
+  if (best > 10 * DEG) return T;
+  const a = T[e].slice(), b = T[(e + 1) % 3].slice(), c = T[(e + 2) % 3].slice(), y = (a[1] + b[1]) / 2;
   a[1] = b[1] = y;
-  if (Math.abs(c[0] - mid) < .12 * Math.abs(b[0] - a[0])) c[0] = mid;
   return [a, b, c];
 }
 /* ---------- Supprimer une cellule : une croix ou une rature dessinée par-dessus ----------
@@ -881,8 +924,17 @@ function classify(raw) { // forme fermée, puis la forme candidate qui colle le 
       let r = canon[0] + j * period / 8;
       for (const c0 of canon) { const d = ((r - c0) % period + period * 1.5) % period - period / 2; if (Math.abs(d) <= 10) r = c0 + Math.round((r - c0 - d) / period) * period; }
       const V = fitBox(regularVerts(k, r, inner), cx, cy, w, h);
-      add(kind, polyDense(V), bias, { verts: V });
+      add(kind, polyDense(V), bias, { verts: V, sides: k, rot: r, inner });
     }
+  }
+  for (let d = 0; d < 8; d++) { // flèche dessinée en contour, huit directions, mesurée dans son propre axe
+    const th = d * Math.PI / 4, ux = Math.cos(th), uy = Math.sin(th);
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const [x, y] of S) { const a = x * ux + y * uy, b = -x * uy + y * ux; a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
+    const L = a1 - a0, Wd = b1 - b0, am = (a0 + a1) / 2, bm = (b0 + b1) / 2;
+    if (L < Wd) continue;                                   // une flèche est plus longue que large
+    const P = arrowLocal(L, Wd, .55 * Wd, clamp(.38 * L, 30, 140)).map(([x, y]) => [(x + am) * ux - (y + bm) * uy, (x + am) * uy + (y + bm) * ux]);
+    add('arrow', polyDense(P), 1.08, { th, L, Wd, mid: [am * ux - bm * uy, am * uy + bm * ux] });
   }
   for (let k = 5; k <= 10; k++) for (let j = 0; j < 3; j++) {
     const ph = j / 3 * TAU / k;
@@ -896,7 +948,42 @@ function classify(raw) { // forme fermée, puis la forme candidate qui colle le 
   if (best.kind === 'poly' && best.verts.length >= 6 && cn < 2.9) best = ell;
   else if (best === ell && near && cn >= 2.9 && near.d < 1.3 * ell.d) best = near;
   const kind = best.kind === 'ellipse' ? (w / h > 1.22 || h / w > 1.22 ? 'oval' : 'circle') : best.kind;
-  return { kind, cx, cy, w, h, S, verts: best.verts || null, k: best.k, ph: best.ph };
+  return { kind, cx, cy, w, h, S, verts: best.verts || null, k: best.k, ph: best.ph, th: best.th, L: best.L, Wd: best.Wd, mid: best.mid,
+           sides: best.sides, rot: best.rot, inner: best.inner };
+}
+function arrowFromStroke(raw) { // flèche tracée d'un geste : une hampe droite, puis une pointe en V à l'une de ses extrémités
+  const P = simplify(raw, 8);
+  if (P.length < 4) return null;
+  let i = 0, best = 0;
+  for (let k = 0; k + 1 < P.length; k++) { const d = Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]); if (d > best) { best = d; i = k; } }
+  if (best < 80) return null;
+  for (const [tail, tip, head] of [[P[i], P[i + 1], P.slice(i + 2)], [P[i + 1], P[i], P.slice(0, i).reverse()]]) { // pointe après ou avant la hampe
+    if (!head.length) continue;
+    const ux = (tip[0] - tail[0]) / best, uy = (tip[1] - tail[1]) / best;
+    let back = 0, far = 0, left = 0, right = 0;
+    for (const p of head) {
+      const dx = p[0] - tip[0], dy = p[1] - tip[1], a = dx * ux + dy * uy, b = -dx * uy + dy * ux;
+      if (Math.hypot(dx, dy) > .6 * best) far++;
+      if (a < -.08 * best) back++;
+      left = Math.max(left, b); right = Math.min(right, b);
+    }
+    if (!far && back && left > .1 * best && right < -.1 * best) return { tail, tip, L: best, span: left - right }; // deux barbes, de part et d'autre
+  }
+  return null;
+}
+function snapDir(th) { const s = Math.round(th / (Math.PI / 4)) * Math.PI / 4; return Math.abs(angDist(th, s)) < 12 * Math.PI / 180 ? s : th; }
+function arrowShape(L, headW, th) { // proportions d'une flèche pleine
+  L = clamp(L, 90, 360); headW = clamp(headW, Math.max(56, .45 * L), Math.min(170, .75 * L));
+  return { kind: 'arrow', L, headW, shaftW: .52 * headW, H: clamp(.36 * L, 36, 130), th };
+}
+function arrowCell(raw) { // la flèche pousse depuis son centre, dans la direction du geste
+  const a = arrowFromStroke(raw);
+  if (!a) return null;
+  const sh = arrowShape(a.L, a.span, snapDir(Math.atan2(a.tip[1] - a.tail[1], a.tip[0] - a.tail[0])));
+  const ox = arrowCore(sh), mx = (a.tail[0] + a.tip[0]) / 2, my = (a.tail[1] + a.tip[1]) / 2;
+  const c = makeCell(mx + Math.cos(sh.th) * ox, my + Math.sin(sh.th) * ox, sh);
+  clampInside(c);
+  return c;
 }
 function offsetsFromPolar(c, polar) { // la membrane part d'un contour donné (trait, ancienne forme) puis se détend
   if (reduce) return;
@@ -927,28 +1014,46 @@ function fitTri(V, w, h) { // triangle redimensionné pour tenir exactement dans
   const g = [S.reduce((t, p) => t + p[0], 0) / S.length, S.reduce((t, p) => t + p[1], 0) / S.length];
   return { verts: S.map(([x, y]) => [x - g[0], y - g[1]]), dx: bx + g[0], dy: by + g[1] };
 }
-function sizeTri(c, tw, th) { // les coins arrondis rognent un peu le cadre : une correction suffit pour tomber juste
-  for (let pass = 0; pass < 2; pass++) {
-    const cur = pass ? boxOf(c) : null;
-    const f = fitTri(c.verts, pass ? tw * tw / cur.w : tw, pass ? th * th / cur.h : th);
-    c.verts = f.verts; c.x += f.dx; c.y += f.dy;
-    buildShape(c);
-  }
+function sizeTri(c, tw, th) { // ajuste au cadre tw × th, puis corrige d'un même facteur ce que les coins arrondis rognent (homothétie)
+  let f = fitTri(c.verts, tw, th);
+  c.verts = f.verts; c.x += f.dx; c.y += f.dy;
+  buildShape(c);
+  const cur = boxOf(c), vb = boxDims(c.verts), k = (tw / cur.w + th / cur.h) / 2;
+  f = fitTri(c.verts, vb.w * k, vb.h * k);
+  c.verts = f.verts; c.x += f.dx; c.y += f.dy;
+  buildShape(c);
 }
+function boxDims(P) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { w: x1 - x0, h: y1 - y0 }; }
 function cellFromStroke(raw) {
   const k = classify(raw);
   if (!k) return null;
-  let shape, cx = k.cx, cy = k.cy;
+  let shape, cx = k.cx, cy = k.cy, tw = 0, th = 0;
   if (k.kind === 'circle') shape = { kind: 'circle', r: clamp((k.w + k.h) / 4, 26, 150) };
-  else if (k.kind === 'rect') { const w = clamp(k.w, 56, 420), h = clamp(k.h, 48, 320); shape = { kind: 'rect', w, h, cr: Math.min(16, .25 * Math.min(w, h)) }; }
+  else if (k.kind === 'rect') { // carré s'il l'est presque
+    let w = k.w, h = k.h;
+    if (Math.max(w, h) / Math.min(w, h) < 1.12) w = h = (w + h) / 2;
+    w = clamp(w, 56, 420); h = clamp(h, 48, 320);
+    shape = { kind: 'rect', w, h, cr: Math.min(16, .25 * Math.min(w, h)) };
+  }
   else if (k.kind === 'oval' || k.kind === 'cloud') shape = { kind: k.kind, w: clamp(k.w, 56, 420), h: clamp(k.h, 48, 320), k: k.k, ph: k.ph };
-  else { // triangle, polygones, étoile : des sommets
-    const n = k.verts.length, g = [k.verts.reduce((t, p) => t + p[0], 0) / n, k.verts.reduce((t, p) => t + p[1], 0) / n];
-    const V = k.verts.map(([x, y]) => [x - g[0], y - g[1]]), f = fitTri(V, clamp(k.w, 48, 360), clamp(k.h, 48, 360));
+  else if (k.kind === 'arrow') {
+    shape = arrowShape(k.L, k.Wd, snapDir(k.th));
+    const ox = arrowCore(shape); cx = k.mid[0] + Math.cos(shape.th) * ox; cy = k.mid[1] + Math.sin(shape.th) * ox;
+  }
+  else { // triangle, polygones, étoile : des sommets, à leurs propres proportions
+    let W0 = k.verts;
+    if (k.sides && (k.sides >= 5 || k.kind === 'star' || Math.max(k.w, k.h) / Math.min(k.w, k.h) < 1.15)) { // régulier : homothétique
+      const U = regularVerts(k.sides, k.rot, k.inner || 0), ub = boxDims(U), R = (k.w / ub.w + k.h / ub.h) / 2;
+      W0 = U.map(([x, y]) => [k.cx + x * R, k.cy + y * R]);
+    }
+    const b = boxDims(W0), sc = clamp(Math.max(b.w, b.h), 48, 360) / Math.max(b.w, b.h); // même facteur sur les deux axes
+    tw = b.w * sc; th = b.h * sc;
+    const n = W0.length, g = [W0.reduce((t, p) => t + p[0], 0) / n, W0.reduce((t, p) => t + p[1], 0) / n];
+    const f = fitTri(W0.map(([x, y]) => [x - g[0], y - g[1]]), tw, th);
     shape = { kind: k.kind, verts: f.verts }; cx = g[0] + f.dx; cy = g[1] + f.dy;
   }
   const c = makeCell(cx, cy, shape);
-  if (c.verts) { sizeTri(c, clamp(k.w, 48, 360), clamp(k.h, 48, 360)); cx = c.x; cy = c.y; }
+  if (c.verts && c.kind !== 'arrow') { sizeTri(c, tw, th); cx = c.x; cy = c.y; }
   c.scale = 1; c.vel.fill(0);
   offsetsFromPolar(c, polarOf(k.S, cx, cy));
   clampInside(c);
@@ -962,8 +1067,13 @@ function applySize(c, src) { // la cellule prend l'encombrement de la source et 
   if (c.kind === 'circle') c.r = clamp(Math.min(w, h) / 2, 26, 150);
   else if (c.kind === 'rect') { c.w = clamp(w, 56, 420); c.h = clamp(h, 48, 320); c.cr = Math.min(16, .25 * Math.min(c.w, c.h)); }
   else if (c.kind === 'oval' || c.kind === 'cloud') { c.w = clamp(w, 56, 420); c.h = clamp(h, 48, 320); }
-  else sizeTri(c, clamp(w, 48, 360), clamp(h, 48, 360));
-  if (!c.verts) buildShape(c);
+  else if (c.kind === 'arrow') {
+    const b = boxOf(c), sx = w / b.w, sy = h / b.h, hz = Math.abs(Math.sin(c.th)) < .2, vt = Math.abs(Math.cos(c.th)) < .2, g = Math.sqrt(sx * sy);
+    const sh = arrowShape(c.L * (hz ? sx : vt ? sy : g), c.headW * (hz ? sy : vt ? sx : g), c.th);
+    Object.assign(c, sh);
+  }
+  else { const b = boxOf(c), f = Math.min(w / b.w, h / b.h); sizeTri(c, clamp(b.w * f, 48, 360), clamp(b.h * f, 48, 360)); } // homothétie : elle tient dans le cadre de la source
+  if (!c.verts || c.kind === 'arrow') buildShape(c);
   offsetsFromPolar(c, polarOf(old, c.x, c.y));
   c.vib = t; c.vibAmp = 2;
   clampInside(c);
@@ -1742,7 +1852,7 @@ function endGesture(e, accept) {
     } else {
       if (pending) endPending(true);                 // pas de croix : le premier trait reprend son sens habituel
       if (isScribble(k)) { for (const l of ours) l.cut = null; fadeInk(ink, t); deleteCell(k.cell, t); }
-      else if (accept && cellFromStroke(ink.pts)) { ink = null; for (const l of ours) l.cut = null; }
+      else if (accept && (cellFromStroke(ink.pts) || arrowCell(ink.pts))) { ink = null; for (const l of ours) l.cut = null; } // forme fermée, ou flèche d'un geste
       else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
         pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
         ink = null;
@@ -1838,7 +1948,7 @@ resize(); readColors();
   makeCell(cx, Math.min(Hh - 70, cy + 170), { kind: 'tri', verts: [[0, -61.3], [60, 30.7], [-60, 30.7]] });
   wake();
 })();
-window.__lab = { cells, links, ropes, opt, classify, cornerness, resample, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
+window.__lab = { cells, links, ropes, opt, classify, cornerness, resample, arrowFromStroke, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
                  get gesture() { return gesture; }, get focused() { return focused; }, get source() { return source; }, get idle() { return !raf; } };
 
 /* ---------- Plein écran ----------

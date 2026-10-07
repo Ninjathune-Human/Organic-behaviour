@@ -1874,7 +1874,9 @@ let raf = 0, lastT = 0;
 function wake() { if (!raf) raf = requestAnimationFrame(frame); }
 function frame(ms) {
   raf = 0;
-  const t = ms / 1000, dt = lastT ? Math.min(1 / 30, t - lastT) : 1 / 60;
+  const t = ms / 1000;
+  if (lastT && t <= lastT) { wake(); return; } // deux images au même instant : sans temps écoulé, les vitesses vaudraient 0/0 et la membrane serait perdue
+  const dt = lastT ? Math.min(1 / 30, t - lastT) : 1 / 60;
   lastT = t;
   const busy = step(dt, t);
   draw(t);
@@ -1893,6 +1895,7 @@ function endPending(apply) { // sans second trait : le premier coupe les liens q
 }
 const LONG_PRESS = .45;   // appui long (s) : la cellule tremble et devient la source de taille
 let source = null, lastTap = null;
+const DBL_TAP = .5;        // double appui : au plus 0,5 s entre le lever du premier et le posé du second
 function select(c) { if (source) source.selected = false; source = c; if (c) { c.selected = true; c.selT = now(); } turnHover = false; wake(); }
 function longPress(g) {
   if (gesture !== g || g.moved || g.rope) return;
@@ -1914,7 +1917,7 @@ cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'pen') penSeen = now();
   else if (e.pointerType === 'touch' && now() - penSeen < .6) return; // paume posée pendant l'écriture au stylet : ignorée
   if (gesture) {
-    const g = gesture, quiet = (g.kind === 'draw' && ink && ink.pts.length < 6) || (g.kind === 'move' && !g.moved) || (g.kind === 'link' && !g.rope);
+    const g = gesture, quiet = (g.kind === 'draw' && ink && ink.pts.every(p => Math.hypot(p[0] - ink.pts[0][0], p[1] - ink.pts[0][1]) < 30)) || (g.kind === 'move' && !g.moved) || (g.kind === 'link' && !g.rope); // une paume bouge à peine
     if (e.pointerType === 'pen' && g.pointerType === 'touch' && quiet) dropGesture(g); // le stylet a la priorité sur une paume
     else return;
   }
@@ -1931,7 +1934,9 @@ cv.addEventListener('pointerdown', e => {
     wake(); return;
   }
   // croix en attente : un appui sur la cellule visée commence le second trait au lieu de la déplacer ou de la relier
-  const z = pending && !pending.shaft && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
+  let z = pending && !pending.shaft && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
+  const lt = lastTap; // second appui d'un double appui : la même cellule, même posé un peu à côté ou sur son bord
+  if (lt && e.timeStamp / 1000 - lt.t < DBL_TAP && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < 32 && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
   cv.setPointerCapture(e.pointerId);
   hover = null;
   if (z && z.part === 'body') {
@@ -1947,7 +1952,7 @@ cv.addEventListener('pointerdown', e => {
     ink = { pts: [[x, y]], fade: null };
     if (pending) clearTimeout(pending.timer);  // le second trait a commencé à temps : on le laisse finir
   }
-  gesture.pointerType = e.pointerType;
+  gesture.pointerType = e.pointerType; gesture.t0 = e.timeStamp / 1000;
   if (z) { const g = gesture; g.press = setTimeout(() => longPress(g), LONG_PRESS * 1000); }
   wake();
 });
@@ -1994,7 +1999,7 @@ cv.addEventListener('pointermove', e => {
   } else {
     g.x = x; g.y = y;
     if (!g.rope) {
-      if (Math.hypot(x - g.sx, y - g.sy) < 4) return;
+      if (Math.hypot(x - g.sx, y - g.sy) < (g.pointerType === 'mouse' ? 4 : 8)) return; // un appui au stylet ou au doigt glisse un peu sans tirer de lien
       clearTimeout(g.press);
       // naissance du connecteur : la membrane d'origine ondule depuis le point de départ
       const A = anchor(g.cell, g, now());
@@ -2006,6 +2011,11 @@ cv.addEventListener('pointermove', e => {
   }
   wake();
 });
+function cellTap(c, t0, t1, x, y, t) { // appui court : la cellule et sa descendance s'allument ; double appui : une fille naît
+  if (lastTap && lastTap.c === c && t0 - lastTap.t < DBL_TAP) { focus(lastTap.was); lastTap = null; budOff(c, t); return; } // du lever du premier au posé du second ; le premier ne compte pas
+  lastTap = { c, t: t1, x, y, was: focused };
+  focus(focused === c ? null : c);
+}
 function endGesture(e, accept) {
   const g = gesture;
   if (!g || e.pointerId !== g.id) return;
@@ -2018,12 +2028,7 @@ function endGesture(e, accept) {
     if (g.cell === source) select(null); else applySize(g.cell, source);
     wake(); return;
   }
-  if (tap && accept) { // appui court : la cellule et sa descendance s'allument ; double appui : une fille naît
-    const dbl = lastTap && lastTap.c === g.cell && t - lastTap.t < .35;
-    if (dbl) { focus(lastTap.was); lastTap = null; budOff(g.cell, t); return; } // le premier appui ne compte pas
-    lastTap = { c: g.cell, t, was: focused };
-    focus(focused === g.cell ? null : g.cell); return;
-  }
+  if (tap && accept) { cellTap(g.cell, g.t0, e.timeStamp / 1000, g.sx, g.sy, t); return; }
   if (g.kind === 'draw') {
     const k = accept ? strokeInfo(ink.pts) : null, ours = links.filter(l => l.cut && !(pending && pending.links.includes(l)));
     if (pending && k && crossesAsX(pending.k, k)) { // second trait de la croix : la cellule disparaît, les liens barrés restent
@@ -2068,7 +2073,21 @@ function endGesture(e, accept) {
   }
   wake();
 }
-cv.addEventListener('pointerup', e => endGesture(e, true));
+cv.addEventListener('pointerup', e => {
+  // Sur iPad, le griffonnage (Scribble) avale parfois le « posé » du stylet : il ne reste que son « lever ».
+  // Un lever sans geste en cours, posé sur une cellule, compte alors comme un appui court.
+  if (!gesture && e.pointerType === 'pen' && !source) {
+    const x = e.clientX, y = e.clientY, lt = lastTap, t1 = e.timeStamp / 1000;
+    let z = zoneOf(x, y);
+    if (lt && t1 - lt.t < DBL_TAP + .15 && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < 32 && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
+    if (z && z.part !== 'bud') cellTap(z.c, t1 - .08, t1, x, y, now()); // posé perdu : on l'estime un instant avant le lever
+    return;
+  }
+  endGesture(e, true);
+});
+// Le griffonnage d'iPadOS intercepte aussi des contacts du stylet hors des champs de texte : un écouteur
+// tactile qui annule l'action par défaut lui rend la main sur la scène (boutons et barre ne sont pas concernés).
+for (const type of ['touchstart', 'touchmove']) cv.addEventListener(type, e => e.preventDefault(), { passive: false });
 cv.addEventListener('pointercancel', e => endGesture(e, false));
 cv.addEventListener('pointerleave', () => { if (!gesture && hover) { hover = null; cv.style.cursor = ''; wake(); } });
 

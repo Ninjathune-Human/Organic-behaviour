@@ -27,13 +27,16 @@ Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la
 
 ### En dessinant
 
-Tracer une forme fermée sur le fond, d'un seul geste. Le tracé est reconnu, puis remplacé par une cellule de la forme correspondante :
+Tracer une forme fermée sur le fond, d'un seul geste. Le tracé est reconnu, puis remplacé par une cellule de la forme correspondante. L'octogone n'en fait pas partie : trop proche du rond, il le faisait mal reconnaître ; un octogone dessiné devient un rond ou un hexagone.
+
+Formes reconnues :
 
 - rond et ovale ;
 - rectangle, qui devient un carré s'il en est proche ;
 - triangle ;
-- losange, pentagone, hexagone, octogone ;
+- losange, pentagone, hexagone ;
 - étoile ;
+- cœur, pointe en bas ;
 - nuage, avec autant de bosses que dessinées ;
 - flèche.
 
@@ -41,6 +44,7 @@ Comme dans un logiciel de dessin, la forme est redressée en **forme standard** 
 
 - un triangle proche de l'équilatéral, du rectangle ou de l'isocèle le devient ;
 - les polygones et l'étoile sont réguliers et homothétiques, avec des branches de même longueur pour l'étoile ;
+- le cœur prend des proportions standard, et les garde quand il change de taille ;
 - une forme presque droite est remise d'aplomb.
 
 La **flèche** se dessine de trois façons :
@@ -128,4 +132,4 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 - Un seul fichier HTML, sans dépendance externe ni serveur.
 - Rendu en Canvas 2D ; les membranes sont des chaînes de points reliés par des ressorts, simulées à 240 pas par seconde. L'animation s'arrête dès que la scène est au repos.
 - Routage orthogonal par [libavoid-js](https://github.com/Aksem/libavoid-js), portage WebAssembly de la bibliothèque libavoid du projet Adaptagrams, sous licence LGPL-2.1-or-later. Le module est embarqué dans la page.
-- Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches.
+- Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches ; le cœur se reconnaît au creux du milieu de son bord supérieur.

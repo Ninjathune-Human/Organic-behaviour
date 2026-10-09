@@ -160,11 +160,11 @@ html, body { overscroll-behavior: none; }
     <li><b>Glisser l’intérieur</b> la déplace ; un lien presque droit l’aimante. Quand elle tremble (appui long), toute sa descendance suit.</li>
     <li><b>Tirer le bord</b> vers une autre cellule en fait sa fille.</li>
     <li><b>Toucher une cellule</b> au doigt ou à la souris : on écrit son texte au clavier. <b>Entrée</b> valide, <b>Maj + Entrée</b> va à la ligne. Au stylet, le texte s’écrit à la main.</li>
-    <li><b>Bouton stylet</b>, ou <b>stylet maintenu sur le fond</b> : on écrit à la main n’importe où (le même appui long arrête). <b>Appui maintenu sur un mot</b>, puis glisser : lâché sur une cellule, il y entre et devient du texte ; lâché au bord de la page, il est jeté.</li>
+    <li><b>Bouton stylet</b>, ou <b>stylet maintenu sur le fond</b> : on écrit à la main n’importe où (le même appui long arrête). <b>Appui maintenu sur un mot</b>, puis glisser : lâché sur une cellule, il y entre et devient du texte ; lâché au bord de la page, il est jeté. Une <b>croix</b> sur un mot l’efface. Une <b>pastille</b> ou un <b>tiret</b> en tête de ligne fait une liste.</li>
     <li><b>Double appui</b> : une fille de même forme bourgeonne ; les suivantes se rangent dessous. Au doigt ou à la souris, son champ de texte s’ouvre.</li>
     <li><b>Barrer</b> un lien le coupe ; <b>une croix ou une rature</b> sur une cellule la supprime.</li>
     <li>Une cellule touchée <b>allume sa lignée</b> ; <b>toucher l’encoche</b> d’une mère replie ou déplie ses filles.</li>
-    <li><b>Appui long</b> : elle tremble ; une autre touchée ensuite prend sa taille, et <b>les marques de son coin</b> la font tourner.</li>
+    <li><b>Appui long</b> : elle tremble ; une autre touchée ensuite prend sa taille, une autre glissée s’aimante sur ses axes, et <b>les marques de son coin</b> la font tourner.</li>
   </ul></div></div>
 </header>
 <p class="toast" id="toast" role="status"></p>
@@ -1544,11 +1544,12 @@ function stepSprings(dt) {
 /* ---------- Aimant : un lien presque droit se redresse ----------
    Pendant le glissement, si un lien de la cellule forme une baïonnette de quelques pixels,
    la cellule est attirée sur la position qui rend ce lien parfaitement droit, et y reste tant
-   que le doigt ne s'en éloigne pas de plus de SNAP_OUT. */
+   que le doigt ne s'en éloigne pas de plus de SNAP_OUT. Quand une cellule tremble, ses axes
+   horizontal et vertical attirent de même les autres cellules glissées, en priorité. */
 function snapAxes(m) {
   const c = m.c;
-  if (m.sx != null && Math.abs(m.rx - m.sx) > SNAP_OUT) { m.sx = null; m.refine = 0; }
-  if (m.sy != null && Math.abs(m.ry - m.sy) > SNAP_OUT) { m.sy = null; m.refine = 0; }
+  if (m.sx != null && Math.abs(m.rx - m.sx) > SNAP_OUT) { m.sx = null; m.refine = 0; m.srcX = false; }
+  if (m.sy != null && Math.abs(m.ry - m.sy) > SNAP_OUT) { m.sy = null; m.refine = 0; m.srcY = false; }
   let jx = null, jy = null;
   for (const l of links) {
     if (!l.pts || (l.a !== c && l.b !== c) || (m.gset && m.gset.has(l.a === c ? l.b : l.a))) continue; // une fille emmenée bouge avec elle : rien à aligner
@@ -1566,8 +1567,9 @@ function snapAxes(m) {
     if (cur == null) return Math.abs(base + j - raw) <= SNAP_IN ? base + j : null;
     return Math.abs(j) > .5 && m.refine++ < 4 ? base + j : cur;
   };
-  m.sx = take(m.sx, jx, c.rx, m.rx);
-  m.sy = take(m.sy, jy, c.ry, m.ry);
+  const src = source && source !== c && !(m.gset && m.gset.has(source)) ? source : null; // la cellule qui tremble sert de repère
+  if (src && (m.srcX || Math.abs(m.rx - src.x) <= SNAP_IN)) { m.sx = src.x; m.srcX = true; } else m.sx = take(m.sx, jx, c.rx, m.rx);
+  if (src && (m.srcY || Math.abs(m.ry - src.y) <= SNAP_IN)) { m.sy = src.y; m.srcY = true; } else m.sy = take(m.sy, jy, c.ry, m.ry);
 }
 function follow(m) { if (m.group) for (const [d, ox, oy] of m.group) { d.x = m.c.x + ox; d.y = m.c.y + oy; } } // la descendance garde sa place autour de la mère
 function magnet(dt, dragging, deferred) {
@@ -1712,17 +1714,23 @@ function fitText(c) { // pendant la saisie : si le texte déborde à 12 px, la c
   while (f < 2.6 && (box.w * f) < 420) { f *= 1.06; if (!layoutText(c.text, { w: box.w * f, h: box.h * f }).over) break; }
   if (f > 1.001) { swell(c, f); c.vib = now(); c.vibAmp = 1.2; }
 }
-function placeField() { // le champ suit sa cellule ; il la couvre largement, pour que le stylet puisse y écrire n'importe où
+function inShape(c, x, y) { // point dans la membrane (à 4 px près)
+  const P = pointAtAngle(c, Math.atan2(y - c.y, x - c.x), now());
+  return Math.hypot(x - c.x, y - c.y) <= Math.hypot(P.x - c.x, P.y - c.y) + 4;
+}
+function placeField() { // le champ suit sa cellule et la couvre, sans la dépasser : un appui hors d'elle termine la saisie
   const c = editing;
   if (!c) return;
-  const L = textLayout(c), s = scaleOf(c), tw = Math.max(90, L.box.w * s), size = Math.max(TEXT_MIN, L.size * s);
+  const L = textLayout(c), s = scaleOf(c), size = Math.max(TEXT_MIN, L.size * s), list = isList(c.text);
+  let tw = Math.max(90, L.box.w * s);
+  if (list) { ctx.save(); ctx.font = textFont(L.size); tw = blockW(L.lines) * s + 2; ctx.restore(); } // liste : le champ épouse son bloc, aligné à gauche
   const [el, er, et, eb] = c.ext, bw = (el + er) * s, bh = (et + eb) * s;
-  const fw = Math.min(W - 16, Math.max(220, bw + 48)), fh = Math.max(110, bh + 48); // zone d'écriture : la cellule et une marge
+  const fw = Math.min(W - 16, Math.max(tw, bw)), fh = Math.max(size * LINE + 8, bh); // zone de saisie : le cadre de la cellule
   const cx = c.x + L.box.dx, cy = c.y + L.box.dy;
-  const key = [Math.round(cx), Math.round(cy), Math.round(tw), Math.round(fw), Math.round(fh), size.toFixed(1), c.fold ? 0 : 1].join();
+  const key = [Math.round(cx), Math.round(cy), Math.round(tw), Math.round(fw), Math.round(fh), size.toFixed(1), c.fold ? 0 : 1, list ? 1 : 0].join();
   if (key === fieldKey) return;
   fieldKey = key;
-  field.style.font = textFont(size); field.style.lineHeight = LINE;
+  field.style.font = textFont(size); field.style.lineHeight = LINE; field.style.textAlign = list ? 'left' : '';
   field.style.width = fw + 'px'; field.style.paddingLeft = field.style.paddingRight = (fw - tw) / 2 + 'px';
   const r = document.createRange(); r.selectNodeContents(field); // hauteur du texte saisi, pour le centrer dans la zone
   const th = field.textContent ? Math.max(size * LINE, r.getBoundingClientRect().height) : size * LINE;
@@ -1779,6 +1787,7 @@ field.addEventListener('blur', () => endEdit());     // clavier refermé, ou app
 field.addEventListener('pointerdown', e => { // second appui d'un double appui posé sur le champ : une fille naît
   inputType = e.pointerType;
   const lt = lastTap, c = editing;
+  if (c && !inShape(c, e.clientX, e.clientY)) { e.preventDefault(); endEdit(); if (focused) focus(null); return; } // coin du cadre, hors de la forme : comme le fond, il termine la saisie
   if (!c || !lt || lt.c !== c || e.timeStamp / 1000 - lt.t >= DBL_TAP || Math.hypot(e.clientX - lt.x, e.clientY - lt.y) >= 32) return;
   e.preventDefault();
   lastTap = null; focus(lt.was); budOff(c, now());
@@ -1794,11 +1803,12 @@ function shownLines(L) { // lignes affichées : trop long pour la forme, la dern
 }
 const backOut = p => 1 + 2.70158 * (p - 1) ** 3 + 1.70158 * (p - 1) ** 2; // léger dépassement, puis repos
 const glyphStart = (A, i) => A.tc + .05 + i * A.stagger;                  // instant où la i-ème nouvelle lettre se forme
+const blockW = lines => Math.max(0, ...lines.map(ln => ctx.measureText(ln).width)); // largeur d'une liste : sa plus longue ligne
 function glyphLayout(c, L, A) { // position (repère de la cellule) et ordre des lettres ; seules les nouvelles s'animent
-  const lines = shownLines(L), lh = L.size * LINE, y0 = -(lines.length - 1) * lh / 2, out = [];
+  const lines = shownLines(L), lh = L.size * LINE, y0 = -(lines.length - 1) * lh / 2, out = [], bw = isList(c.text) ? blockW(lines) : 0;
   let k = 0;
   lines.forEach((ln, i) => {
-    const w = ctx.measureText(ln).width;
+    const w = bw || ctx.measureText(ln).width;      // liste : toutes les lignes partent du bord gauche du bloc
     for (let j = 0; j < ln.length; j++) {
       if (!ln[j].trim()) continue;
       const x0 = ctx.measureText(ln.slice(0, j)).width, x1 = ctx.measureText(ln.slice(0, j + 1)).width;
@@ -1817,7 +1827,8 @@ function drawText(c, t, mx, my) { // le texte suit le centre de la cellule, et s
   const A = c.textAnim && t < c.textAnim.end ? c.textAnim : null;
   if (!A) {
     const lines = shownLines(L), y0 = -(lines.length - 1) * lh / 2;
-    lines.forEach((ln, i) => ctx.fillText(ln, 0, y0 + i * lh));
+    if (isList(c.text)) { ctx.textAlign = 'left'; const x = -blockW(lines) / 2; lines.forEach((ln, i) => ctx.fillText(ln, x, y0 + i * lh)); }
+    else lines.forEach((ln, i) => ctx.fillText(ln, 0, y0 + i * lh));
   } else { // le texte se forme lettre après lettre : il grandit, prend corps, et passe de la teinte de la cellule à l'encre du texte
     ctx.textAlign = 'left';
     const tint = tintOf(c, t), lab = colors.labelRGBA;
@@ -1866,7 +1877,7 @@ function boxOfPts(P) { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -I
 function inkAt(x, y) { // le mot dont un trait passe sous le doigt (12 px de tolérance)
   for (let i = inks.length - 1; i >= 0; i--) {
     const k = inks[i], b = k.box, px = x - k.dx, py = y - k.dy;
-    if (k.fly || px < b.x0 - 12 || px > b.x1 + 12 || py < b.y0 - 12 || py > b.y1 + 12) continue;
+    if (k.fly || k.gone || px < b.x0 - 12 || px > b.x1 + 12 || py < b.y0 - 12 || py > b.y1 + 12) continue;
     for (const st of k.strokes) for (const [sx, sy] of st) if ((sx - px) ** 2 + (sy - py) ** 2 < 144) return k;
   }
   return null;
@@ -1876,10 +1887,13 @@ function addStroke(pts, t) { // un trait rejoint le mot qu'il prolonge (proche, 
   let g = null;
   for (let i = inks.length - 1; i >= 0 && !g; i--) {
     const k = inks[i], B = k.box;
-    if (k.fly) continue;
+    if (k.fly || k.gone) continue;
     const near = b.x0 < B.x1 + 70 && b.x1 > B.x0 - 70 && b.y0 < B.y1 + 40 && b.y1 > B.y0 - 40;
     const touch = b.x0 < B.x1 + 12 && b.x1 > B.x0 - 12 && b.y0 < B.y1 + 12 && b.y1 > B.y0 - 12;
-    if ((near && t - k.t < 2.5) || touch) g = k;
+    if ((near && t - k.t < 2.5) || touch) { g = k; break; }
+    // pastille ou tiret posé sous le mot, aligné sur son bord gauche : la ligne suivante d'une liste
+    const hs = k.strokes.map(st => { const q = boxOfPts(st); return q.y1 - q.y0; }).filter(h => h >= 8).sort((p, q) => p - q), H = hs.length ? hs[hs.length >> 1] : 30;
+    if (b.y1 - b.y0 < 8 && b.x1 - b.x0 < 30 && Math.abs(b.x0 - B.x0) < 40 && b.y0 > B.y1 - 4 && b.y0 - B.y1 < 2.5 * H && t - k.t < 2.5) g = k;
   }
   if (!g) { g = { strokes: [], dx: 0, dy: 0, lift: 0, fly: null }; inks.push(g); }
   g.strokes.push(pts); g.t = t; g.box = boxOfPts(g.strokes.flat());
@@ -1894,6 +1908,40 @@ function dropInk(k, x, y) {
   for (const st of k.strokes) for (const p of st) { p[0] += k.dx; p[1] += k.dy; }  // posé ailleurs : il reste là
   k.dx = k.dy = 0; k.box = boxOfPts(k.strokes.flat());
 }
+/* Rature d'un mot manuscrit : une croix, deux traits droits qui se coupent sur lui (le second dans les 3 s),
+   l'efface. Hors écriture, ce sont deux traits ordinaires ; en écriture, deux traits qui barrent tout le mot,
+   ce qu'une lettre n'atteint pas. */
+function wordBar(k) { // le mot que ce trait droit barre : il le traverse sur au moins la moitié de sa diagonale
+  if (!k || k.straight < .85) return null;
+  let best = null, bi = 0;
+  for (const w of inks) {
+    if (w.fly || w.gone || w.lift) continue;
+    const b = w.box, D = Math.hypot(b.x1 - b.x0, b.y1 - b.y0);
+    let inLen = 0;
+    for (let i = 1; i < k.S.length; i++) {
+      const mx = (k.S[i][0] + k.S[i - 1][0]) / 2, my = (k.S[i][1] + k.S[i - 1][1]) / 2;
+      if (mx > b.x0 - 8 && mx < b.x1 + 8 && my > b.y0 - 8 && my < b.y1 + 8) inLen += Math.hypot(k.S[i][0] - k.S[i - 1][0], k.S[i][1] - k.S[i - 1][1]);
+    }
+    if (inLen >= .5 * D && inLen > bi) { bi = inLen; best = w; }
+  }
+  return best;
+}
+function crossesWord(a, b, w) { // le second trait coupe le premier sur le mot, franchement incliné
+  if (!a || !b || wordBar(b) !== w) return false;
+  const A0 = a.S[0], A1 = a.S[a.S.length - 1], B0 = b.S[0], B1 = b.S[b.S.length - 1], k = crossing(A0, A1, B0, B1);
+  if (!k) return false;
+  const x = A0[0] + (A1[0] - A0[0]) * k.t, y = A0[1] + (A1[1] - A0[1]) * k.t, bx = w.box;
+  const ang = Math.abs(angDist(Math.atan2(A1[1] - A0[1], A1[0] - A0[0]), Math.atan2(B1[1] - B0[1], B1[0] - B0[0]))) % Math.PI;
+  return x > bx.x0 - 8 && x < bx.x1 + 8 && y > bx.y0 - 8 && y < bx.y1 + 8 && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
+}
+function eraseWord(w, t, stroke) { // le mot se contracte et s'efface ; le premier trait de la croix part avec lui
+  w.gone = t;
+  for (const k of inks) { const i = k.strokes.indexOf(stroke); if (i >= 0 && k !== w) { k.strokes.splice(i, 1); if (k.strokes.length) k.box = boxOfPts(k.strokes.flat()); else k.gone = t; } }
+  setTimeout(() => { for (let i = inks.length - 1; i >= 0; i--) if (inks[i].gone && now() - inks[i].gone >= .35) inks.splice(i, 1); wake(); }, 400);
+  if (navigator.vibrate) navigator.vibrate(8);
+  wake();
+}
+let inkX = null;                 // en écriture : premier trait d'une croix sur un mot, en attente du second
 function inkImage(k) { // le mot en noir sur blanc, tracé comme à l'écran, agrandi s'il est petit, pour la lecture
   const b = k.box, pad = 18, s = clamp(260 / Math.max(40, b.y1 - b.y0), 1, 4);
   const c2 = document.createElement('canvas'), x2 = c2.getContext('2d');
@@ -1944,10 +1992,12 @@ async function readInk(sample, img, context) {
     : `Voici ${ex.length + 1} images d'écriture manuscrite tracée au stylet, en noir sur fond blanc, toutes de la même personne. `
       + (ex.length > 1 ? `Les ${ex.length} premières sont des exemples` : 'La première est un exemple') + ' de son écriture, avec leur transcription exacte : '
       + ex.map((h, i) => `image ${i + 1} : « ${h.text} »`).join(' ; ') + '. Sers-toi de ces exemples pour reconnaître sa façon de former les lettres, puis transcris exactement la dernière image. ';
-  const { text } = await sample(head + "C'est le plus souvent un mot ou une courte expression en français, destinée à une cellule de carte mentale. " + context
-    + 'Respecte les majuscules, les accents et la ponctuation. Réponds uniquement par le texte transcrit, sur une seule ligne, sans guillemets ni commentaire. '
+  const { text } = await sample(head + "C'est le plus souvent un mot, une courte expression ou une petite liste en français, destinée à une cellule de carte mentale. " + context
+    + 'Respecte les majuscules, les accents et la ponctuation, et les retours à la ligne : une ligne par ligne écrite. '
+    + 'Une pastille en début de ligne (point, rond plein ou petit cercle) se transcrit « • », un tiret de liste « – », chacun suivi d\'une espace. '
+    + 'Réponds uniquement par le texte transcrit, sans guillemets ni commentaire. '
     + "Si rien n'est lisible, réponds exactement : ∅", { images: [...ex.map(blobOf), img], modelTier: 'default' });
-  const out = text.replace(/\s+/g, ' ').trim().replace(/^["«“”»\s]+|["«“”»\s]+$/g, '');
+  const out = joinLines(text.trim().replace(/^["«“”»\s]+|["«“”»\s]+$/g, '').split(/\r?\n/));
   if (!out || out === '∅') throw { code: 'illisible' };
   return out;
 }
@@ -1973,9 +2023,9 @@ function learnFrom(c, was, now) { // un mot lu puis corrigé au clavier : son im
 /* Hors de Claude (GitHub Pages…), la page ne peut pas lui demander de lire : la reconnaissance d'écriture de Google
    prend le relais. Service non officiel, sans clé ; il lit les traits dans l'ordre et au rythme où ils ont été tracés. */
 const HANDWRITING = 'https://inputtools.google.com/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8';
-async function readGoogle(k) {
-  const b = k.box, r = Math.round;
-  const ink = k.strokes.map(st => [st.map(p => r(p[0] - b.x0)), st.map(p => r(p[1] - b.y0)), st.map(p => p[2] || 0)]);
+async function googleLine(strokes) { // une ligne d'écriture, lue par Google
+  const b = boxOfPts(strokes.flat()), r = Math.round;
+  const ink = strokes.map(st => [st.map(p => r(p[0] - b.x0)), st.map(p => r(p[1] - b.y0)), st.map(p => p[2] || 0)]);
   const body = JSON.stringify({ options: 'enable_pre_space', requests: [{ writing_guide: { writing_area_width: r(b.x1 - b.x0) + 1, writing_area_height: r(b.y1 - b.y0) + 1 }, ink, language: 'fr' }] });
   let res;
   try { res = await fetch(HANDWRITING, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
@@ -1984,10 +2034,51 @@ async function readGoogle(k) {
   }
   const json = res.ok ? await res.json().catch(() => null) : null;
   if (!json || json[0] !== 'SUCCESS') throw { code: 'upstream_error' };
-  const out = String(((json[1] && json[1][0] && json[1][0][1]) || [])[0] || '').replace(/\s+/g, ' ').trim();
+  return String(((json[1] && json[1][0] && json[1][0][1]) || [])[0] || '');
+}
+async function readGoogle(k) {
+  const L = inkLines(k), texts = await Promise.all(L.map(l => googleLine(l.strokes)));
+  const out = joinLines(texts.map((t, i) => t.trim() ? (L[i].mark ? L[i].mark + ' ' : '') + t : ''));
   if (!out) throw { code: 'illisible' };
   return out;
 }
+/* Listes manuscrites : l'écriture est découpée en lignes ; en tête de ligne, un petit point ou rond isolé est une
+   pastille, un trait court et plat isolé un tiret. Ni l'un ni l'autre ne touche une lettre (barre de t, accent, point d'i). */
+function inkLines(k) {
+  const items = k.strokes.map(st => ({ st, b: boxOfPts(st) })), hOf = it => it.b.y1 - it.b.y0, cyOf = it => (it.b.y0 + it.b.y1) / 2;
+  const lines = [];
+  for (const it of items.filter(it => hOf(it) >= 8).sort((a, b) => cyOf(a) - cyOf(b))) { // les lettres, de haut en bas
+    const ln = lines.find(l => Math.abs(cyOf(it) - l.cy) < .6 * Math.max(l.h, hOf(it)));
+    if (!ln) { lines.push({ items: [it], cy: cyOf(it), h: hOf(it), y0: it.b.y0, y1: it.b.y1 }); continue; }
+    ln.items.push(it); const n = ln.items.length;
+    ln.cy += (cyOf(it) - ln.cy) / n; ln.h += (hOf(it) - ln.h) / n; ln.y0 = Math.min(ln.y0, it.b.y0); ln.y1 = Math.max(ln.y1, it.b.y1);
+  }
+  if (!lines.length) return [{ strokes: k.strokes, mark: '' }];
+  for (const it of items.filter(it => hOf(it) < 8)) { // points, tirets, barres et accents : à la ligne la plus proche
+    const d = l => cyOf(it) < l.y0 ? l.y0 - cyOf(it) : cyOf(it) > l.y1 ? cyOf(it) - l.y1 : 0;
+    lines.reduce((a, l) => d(l) < d(a) ? l : a).items.push(it);
+  }
+  return lines.sort((a, b) => a.cy - b.cy).map(l => {
+    const its = l.items.sort((a, b) => a.b.x0 - b.b.x0), H = Math.max(12, l.h), f = its[0], rest = its.slice(1);
+    let mark = '';
+    if (rest.length && !rest.some(r => r.b.x0 < f.b.x1 && r.b.x1 > f.b.x0) && Math.min(...rest.map(r => r.b.x0)) - f.b.x1 >= .2 * H) {
+      const w = f.b.x1 - f.b.x0, h = hOf(f);
+      if (Math.max(w, h) <= Math.max(6, .4 * H)) mark = '•';
+      else if (h <= .3 * w && w <= 2 * H) mark = '–';
+    }
+    return { strokes: (mark ? rest : its).map(it => it.st), mark };
+  });
+}
+function joinLines(lines) { // retours à la ligne gardés devant les puces et les tirets ; ailleurs, les lignes se suivent
+  const out = [];
+  for (const raw of lines) {
+    const l = raw.replace(/\s+/g, ' ').trim(), m = l.match(/^([•·∙●○◦▪*]|[-–—])\s*(.+)$/);
+    if (m) out.push((/[-–—]/.test(m[1]) ? '– ' : '• ') + m[2]);
+    else if (l) { if (out.length) out[out.length - 1] += ' ' + l; else out.push(l); }
+  }
+  return out.join('\n');
+}
+const isList = text => /^[•–] /m.test(text || '');
 const INK_SAY = {
   reseau: "La lecture de l'écriture n'a pas abouti : vérifiez la connexion, puis réessayez.",
   not_granted: "Pour lire l'écriture, le laboratoire a besoin de votre accord pour utiliser Claude.",
@@ -2066,7 +2157,7 @@ function absorb(k, c) { // le mot entre dans la cellule, qui le « digère » pe
   const place = (text, img) => { // le mot lu entre dans le texte de la cellule
     const nonSpace = str => (str.match(/\S/g) || []).length, old = nonSpace(c.text || ''), n = nonSpace(text), tc = now();
     const w = { start: c.text ? c.text.length + 1 : 0, text, img };
-    c.text = c.text ? c.text + ' ' + text : text; c._tl = null;
+    c.text = c.text ? c.text + (/^[•–] /.test(text) ? '\n' : ' ') + text : text; c._tl = null; // une puce ou un tiret ouvre une nouvelle ligne
     if (editing === c) { field.textContent = c.text; editFrom = c.text; placeField(); if (document.activeElement === field) focusField(); } // champ ouvert pendant la lecture : le mot s'y ajoute
     (c.reads = c.reads || []).push(w);
     inks.splice(inks.indexOf(k), 1);
@@ -2100,7 +2191,8 @@ function drawInks(t) {
   for (const k of inks) {
     const cx0 = (k.box.x0 + k.box.x1) / 2, cy0 = (k.box.y0 + k.box.y1) / 2;
     if (k.fly) continue;                            // il se dissout : ce sont ses gouttelettes qu'on voit
-    const ox = k.dx, oy = k.dy, sc = 1 + .05 * k.lift, al = .9 * (k.appear ? clamp((t - k.appear) / .35, 0, 1) : 1);
+    const gp = k.gone ? clamp((t - k.gone) / .35, 0, 1) : 0;
+    const ox = k.dx, oy = k.dy, sc = (1 + .05 * k.lift) * (1 - .25 * gp * gp), al = .9 * (k.appear ? clamp((t - k.appear) / .35, 0, 1) : 1) * (1 - gp);
     ctx.save();
     ctx.globalAlpha = al;
     if (k.lift) { ctx.shadowColor = colors.shadow; ctx.shadowBlur = 14 * DPR; ctx.shadowOffsetY = 4 * DPR; }
@@ -2231,7 +2323,7 @@ function step(dt, t) {
     c.fs = 1 - .95 * p * p;
   }
   for (let i = ghosts.length - 1; i >= 0; i--) if (t - ghosts[i].fade >= .35) ghosts.splice(i, 1);
-  const inkBusy = !!ink || ghosts.length > 0 || !!pending || motesOn || inks.some(k => k.fly || k.lift || (k.appear && t - k.appear < .4));
+  const inkBusy = !!ink || ghosts.length > 0 || !!pending || motesOn || inks.some(k => k.fly || k.lift || k.gone || (k.appear && t - k.appear < .4));
   return !!gesture || inkBusy || magOn || turnOn || springs || ropes.length > 0 || needsRoute ||
          cells.some(c => cellBusy(c, t) || c.ax || c.ay) || links.some(l => linkBusy(l, t));
 }
@@ -2448,7 +2540,7 @@ cv.addEventListener('pointerdown', e => {
   const x = e.clientX, y = e.clientY;
   inputType = e.pointerType;
   endEdit();                                       // toucher la scène valide le texte en cours
-  const word = inkAt(x, y);
+  const hit = inkAt(x, y), word = hit && !(pending && pending.word === hit) ? hit : null; // croix en attente sur ce mot : on trace, on ne le saisit pas
   if (word || writeMode) { // un mot manuscrit (le soulever), ou l'écriture libre (un nouveau trait)
     cv.setPointerCapture(e.pointerId); hover = null;
     const g = gesture = { kind: 'ink', grp: word, id: e.pointerId, pointerType: e.pointerType, sx: x, sy: y, ts0: e.timeStamp, pts: [[x, y, 0]], lifted: false }; // points datés : le rythme du tracé aide la lecture
@@ -2468,7 +2560,7 @@ cv.addEventListener('pointerdown', e => {
     wake(); return;
   }
   // croix en attente : un appui sur la cellule visée commence le second trait au lieu de la déplacer ou de la relier
-  let z = pending && !pending.shaft && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
+  let z = pending && !pending.shaft && pending.k.cell && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
   const lt = lastTap; // second appui d'un double appui : la même cellule, même posé un peu à côté ou sur son bord
   if (lt && e.timeStamp / 1000 - lt.t < DBL_TAP && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < 32 && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
   cv.setPointerCapture(e.pointerId);
@@ -2571,7 +2663,11 @@ function endGesture(e, accept) {
   if (g.kind === 'ink') { // mot posé (dans une cellule, ailleurs, ou jeté), ou trait d'écriture ajouté
     if (g.consumed) { wake(); return; }               // appui long qui a ouvert ou fermé l'écriture : pas de trait
     if (g.lifted) dropInk(g.grp, e.clientX, e.clientY);
-    else if (writeMode && accept) addStroke(g.pts, t);
+    else if (writeMode && accept) {
+      const k = strokeInfo(g.pts), w = wordBar(k);
+      if (inkX && w === inkX.word && t - inkX.t < 3 && crossesWord(inkX.k, k, w)) { eraseWord(w, t, inkX.stroke); fadeInk({ pts: g.pts }, t); inkX = null; }
+      else { addStroke(g.pts, t); inkX = w ? { word: w, k, t, stroke: g.pts } : null; }
+    }
     wake(); return;
   }
   if (g.consumed && !(g.family && g.moved)) { wake(); return; }
@@ -2584,7 +2680,11 @@ function endGesture(e, accept) {
   if (tap && accept) { cellTap(g.cell, g.t0, e.timeStamp / 1000, g.sx, g.sy, t); return; }
   if (g.kind === 'draw') {
     const k = accept ? strokeInfo(ink.pts) : null, ours = links.filter(l => l.cut && !(pending && pending.links.includes(l)));
-    if (pending && k && crossesAsX(pending.k, k)) { // second trait de la croix : la cellule disparaît, les liens barrés restent
+    if (pending && pending.word && k && crossesWord(pending.k, k, pending.word)) { // second trait de la croix sur un mot manuscrit : il s'efface
+      const p = pending; endPending(false);
+      for (const l of ours) l.cut = null;
+      fadeInk(ink, t); eraseWord(p.word, t);
+    } else if (pending && k && crossesAsX(pending.k, k)) { // second trait de la croix : la cellule disparaît, les liens barrés restent
       const p = pending; endPending(false);
       for (const l of ours) l.cut = null;
       fadeInk(ink, t); deleteCell(p.k.cell, t);
@@ -2595,7 +2695,10 @@ function endGesture(e, accept) {
       if (pending) endPending(true);                 // pas de croix : le premier trait reprend son sens habituel
       if (isScribble(k)) { for (const l of ours) l.cut = null; fadeInk(ink, t); deleteCell(k.cell, t); }
       else if (accept && (cellFromStroke(ink.pts) || arrowCell(ink.pts))) { ink = null; for (const l of ours) l.cut = null; } // forme fermée, ou flèche d'un geste
-      else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
+      else if (accept && wordBar(k)) { // trait droit sur un mot manuscrit : peut-être le premier trait d'une croix
+        pending = { k, ink, links: ours, word: wordBar(k), timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
+        ink = null;
+      } else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
         pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
         ink = null;
       } else if (accept && k && !ours.length && k.straight >= .9 && k.L >= 60) { // trait droit sur le fond : peut-être la hampe d'une flèche, il attend sa pointe
@@ -2711,7 +2814,7 @@ resize(); readColors();
   makeCell(cx, Math.min(Hh - 70, cy + 170), { kind: 'tri', verts: [[0, -61.3], [60, 30.7], [-60, 30.7]] });
   wake();
 })();
-window.__lab = { inks, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
+window.__lab = { inks, inkLines, joinLines, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
                  get gesture() { return gesture; }, get focused() { return focused; }, get source() { return source; }, get idle() { return !raf; } };
 
 /* ---------- Plein écran ----------

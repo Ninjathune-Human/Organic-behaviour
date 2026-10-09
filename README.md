@@ -20,10 +20,12 @@ Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la
 | Appui long | Met la cellule en mode tremblement |
 | Glisser une cellule qui tremble | Déplace toute sa lignée |
 | Appui sur une autre cellule (mode tremblement) | Lui donne la taille de la cellule qui tremble |
+| Glisser une autre cellule (mode tremblement) | L'aligne sur l'axe horizontal ou vertical de la cellule qui tremble |
 | Tirer les marques du coin (mode tremblement) | Fait tourner la cellule |
 | Appui sur l'encoche d'une mère | Replie ou déplie ses filles |
 | Trait en travers d'un lien | Coupe le lien |
 | Croix ou rature sur une cellule | Supprime la cellule |
+| Croix sur un mot manuscrit | Efface le mot |
 
 ## Créer une cellule
 
@@ -69,7 +71,7 @@ Un **double appui** sur une cellule, au doigt, au stylet ou à la souris, fait n
 
 ### Au clavier
 
-Un appui simple sur une cellule, au doigt ou à la souris, ouvre un champ posé sur elle, dans la même typographie que le texte affiché. **Entrée** valide, **Maj + Entrée** va à la ligne, et un appui ailleurs valide aussi. Au stylet, l'appui allume seulement la lignée : le texte s'écrit à la main.
+Un appui simple sur une cellule, au doigt ou à la souris, ouvre un champ posé sur elle, dans la même typographie que le texte affiché. **Entrée** valide, **Maj + Entrée** va à la ligne, et un appui hors de la cellule, même tout près de son bord, valide aussi et referme la saisie. Au stylet, l'appui allume seulement la lignée : le texte s'écrit à la main.
 
 Le texte se cale dans la forme. S'il déborde, sa taille diminue jusqu'à 12 px, puis la cellule grandit juste assez pour le contenir ; au-delà, la dernière ligne visible se termine par des points de suspension. Une cellule écrite perd son noyau et prend une légère teinte.
 
@@ -80,11 +82,15 @@ Le texte se cale dans la forme. S'il déborde, sa taille diminue jusqu'à 12 px,
 3. **Glisser le mot** : appui maintenu sur le mot, il se soulève, puis le glisser. La cellule visée s'éclaire. Hors écriture libre, le mot part dès qu'on le glisse.
 4. **Lâcher** : sur une cellule, le mot y entre ; sur le fond, il reste là ; au bord de la page, il est jeté.
 
+**Écrire une liste.** Commencer chaque ligne par une pastille (un point, un petit rond) ou par un tiret. Une pastille ou un tiret posé sous le mot, aligné sur son bord gauche, dans les 2,5 secondes, rattache la ligne au même mot : toute la liste se glisse d'un geste. À la lecture, chaque ligne repérée devient une ligne du texte, précédée de « • » ou de « – » ; les autres retours à la ligne de l'écriture sont réunis en une seule ligne. Dans la cellule, une liste commence sur une nouvelle ligne et s'affiche alignée à gauche, en bloc centré ; le champ de saisie au clavier suit la même mise en page.
+
+**Effacer un mot** qu'on ne veut pas garder : une croix dessus, deux traits droits qui se coupent sur le mot, le second dans les 3 secondes. Le mot se contracte et s'efface. En écriture libre, chaque trait doit barrer le mot sur au moins la moitié de sa diagonale, ce qu'une lettre comme un t ou un x n'atteint pas. Hors écriture, commencer le premier trait à côté de l'encre : un trait qui part du mot le saisit pour le glisser.
+
 ### La lecture
 
 Lâché dans une cellule, le mot se défait en gouttelettes d'encre qui entrent dans la membrane, s'y diffusent en tournoyant et prennent sa teinte, pendant qu'une onde lente fait le tour de la cellule. Le texte lu s'ajoute à celui de la cellule : chaque gouttelette se condense sur une lettre, qui grandit et prend corps, puis une lueur passe. Seul le résultat final s'affiche, au bout de quelques secondes.
 
-- **Lecteur.** Dans Claude, le mot est rendu en image, noir sur blanc, et lu par Claude avec son modèle standard. Ailleurs, sur GitHub Pages par exemple, la page ne peut pas faire appel à Claude : c'est la reconnaissance d'écriture de Google qui lit le mot, à partir de ses traits, de leur ordre et de leur rythme.
+- **Lecteur.** Dans Claude, le mot est rendu en image, noir sur blanc, et lu par Claude avec son modèle standard, qui repère aussi les pastilles et les tirets. Ailleurs, sur GitHub Pages par exemple, la page ne peut pas faire appel à Claude : c'est la reconnaissance d'écriture de Google qui lit le mot, à partir de ses traits, de leur ordre et de leur rythme ; la page découpe alors l'écriture en lignes, reconnaît elle-même les pastilles et les tirets à leur forme (petits, isolés en tête de ligne, sans toucher une lettre), et fait lire chaque ligne séparément.
 - **Contexte** (dans Claude). Claude reçoit aussi le texte déjà présent dans la cellule, celui de sa mère, de ses filles et de ses sœurs, pour trancher entre des lectures proches.
 - **Apprentissage** (dans Claude). Quand un mot est mal lu, le corriger au clavier : son image et sa bonne transcription deviennent un exemple de l'écriture, et les six derniers accompagnent chaque lecture. Une réécriture sans rapport avec la lecture (plus de la moitié des lettres changées) n'est pas apprise. Les exemples restent dans le navigateur.
 - **Échec.** Si le mot est illisible ou si la lecture n'aboutit pas, les gouttelettes s'évanouissent, le mot réapparaît à sa place et un message dit pourquoi.
@@ -117,6 +123,8 @@ Les liens sont routés en orthogonal autour des cellules, sans les traverser, et
 Un **appui long** (environ une demi-seconde) sur une cellule la fait trembler. Un appui sur le fond termine ce mode.
 
 **Transmettre une taille.** Pendant que la cellule tremble, un appui sur une autre cellule lui donne son encombrement. Elle s'y glisse en ondulant, en gardant sa forme : un polygone ou une étoile change de taille sans se déformer.
+
+**Aligner.** Pendant que la cellule tremble, les autres cellules qu'on glisse sont attirées par ses axes horizontal et vertical : quand leur centre passe à moins de 8 px de l'un d'eux, elles s'y calent d'un mouvement amorti, parfaitement alignées, et s'en libèrent au-delà de 16 px. Ces axes l'emportent sur l'aimant des liens.
 
 **Tourner.** Deux petites marques courbes apparaissent au coin de la cellule qui tremble. Les tirer fait tourner la cellule autour de son centre :
 

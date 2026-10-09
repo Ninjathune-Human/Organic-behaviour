@@ -23,7 +23,7 @@
   --wire: rgba(58,69,88,.62);
   --glow: #32ADE6;
   --shadow: rgba(30,40,60,.22);
-  --hues: #6F8FD8 #4EA597 #C68C3C #BF6A86 #8C78CC #6C9C55;
+  --hues: #6F8FD8 #4EA597 #C68C3C #BF6A86 #8C78CC #6C9C55 #C8664A #7A8798;
   --label: rgba(0,0,0,.88);
   --label-2: rgba(0,0,0,.56);
   --glass: rgba(255,255,255,.72);
@@ -38,7 +38,7 @@
   :root:not([data-theme="light"]) {
     --ground: #121214; --dot: rgba(255,255,255,.06);
     --cell: #242428; --membrane: rgba(255,255,255,.30); --nucleus: rgba(255,255,255,.09);
-    --wire: rgba(255,255,255,.58); --glow: #64D2FF; --shadow: rgba(0,0,0,.6); --hues: #8FAAF0 #5CC2B3 #E0A85A #E08AA5 #A996EA #8BBF73;
+    --wire: rgba(255,255,255,.58); --glow: #64D2FF; --shadow: rgba(0,0,0,.6); --hues: #8FAAF0 #5CC2B3 #E0A85A #E08AA5 #A996EA #8BBF73 #E5876C #9FAABA;
     --label: rgba(255,255,255,.92); --label-2: rgba(255,255,255,.56);
     --glass: rgba(30,30,33,.72); --glass-edge: rgba(255,255,255,.10); --fill: rgba(118,118,128,.24); --accent: #0A84FF;
   }
@@ -46,7 +46,7 @@
 :root[data-theme="dark"] {
   --ground: #121214; --dot: rgba(255,255,255,.06);
   --cell: #242428; --membrane: rgba(255,255,255,.30); --nucleus: rgba(255,255,255,.09);
-  --wire: rgba(255,255,255,.58); --glow: #64D2FF; --shadow: rgba(0,0,0,.6); --hues: #8FAAF0 #5CC2B3 #E0A85A #E08AA5 #A996EA #8BBF73;
+  --wire: rgba(255,255,255,.58); --glow: #64D2FF; --shadow: rgba(0,0,0,.6); --hues: #8FAAF0 #5CC2B3 #E0A85A #E08AA5 #A996EA #8BBF73 #E5876C #9FAABA;
   --label: rgba(255,255,255,.92); --label-2: rgba(255,255,255,.56);
   --glass: rgba(30,30,33,.72); --glass-edge: rgba(255,255,255,.10); --fill: rgba(118,118,128,.24); --accent: #0A84FF;
 }
@@ -165,6 +165,7 @@ html, body { overscroll-behavior: none; }
     <li><b>Barrer</b> un lien le coupe ; <b>une croix ou une rature</b> sur une cellule la supprime.</li>
     <li>Une cellule touchée <b>allume sa lignée</b> ; <b>toucher l’encoche</b> d’une mère replie ou déplie ses filles.</li>
     <li><b>Appui long</b> : elle tremble ; une autre touchée ensuite prend sa taille, une autre glissée s’aimante sur ses axes, et <b>les marques de son coin</b> la font tourner.</li>
+    <li><b>Outils</b> : quand elle tremble, quatre <b>billes</b> se rangent à la suite de ses marques : couleur, typographie, taille et style. Touchée, une bille déplie ses choix en arc ; touchée de nouveau, elle les replie. Une <b>goutte</b> teint la cellule et sa lignée (la goutte d’eau lave le pigment) ; un <b>pétale</b> change la typographie, la taille ou le style du texte.</li>
   </ul></div></div>
 </header>
 <p class="toast" id="toast" role="status"></p>
@@ -414,7 +415,7 @@ let hueCount = 0;
 function makeCell(x, y, shape) {
   const c = { x, y, ...shape, scale: reduce ? 1 : 0, sv: 0, lift: 0, lv: 0, phase: Math.random() * TAU,
               vib: null, vibAmp: 3.2, halo: null, pull: null, ax: 0, ay: 0, px: x, py: y, pvx: 0, pvy: 0,
-              native: hueCount % 6, hue: hueCount++ % 6, tr: null, lit: null };
+              native: hueCount % 6, hue: hueCount++ % 6, tr: null, lit: null, own: null, dye: false, dyeFx: null };
   buildShape(c);
   if (!reduce) for (let i = 0; i < c.n; i++) c.vel[i] = (Math.random() - .5) * 70; // naissance irrégulière
   cells.push(c);
@@ -486,6 +487,8 @@ function cellBusy(c, t) {
   if (c.budT0 && t - c.budT0 < .4) return true;
   if ((c.selected || c.reading) && !reduce) return true;
   if (c.tr && t - c.tr.t0 < .6) return true;
+  if (c.dyeFx && t < c.dyeFx.t0 + DYE_T) return true;
+  if (c.selected && c.ringR != null && Math.abs(c.ringR - toolRadius(c)) > .3) return true;
   if (c.lit && (c.lit.off || t - c.lit.on < .25)) return true;
   if (Math.abs(1 - c.scale) > .001 || Math.abs(c.sv) > .01 || c.pull) return true;
   if (Math.abs(c.lift) > .002 || Math.abs(c.lv) > .01) return true;
@@ -560,9 +563,39 @@ function tintOf(c, t) {
   return c.tr.from.map((v, i) => v + (to[i] - v) * e);
 }
 function setHue(c, hue, t0) { if (c.hue === hue) return; c.tr = { from: tintOf(c, now()), t0 }; c.hue = hue; }
-function passHue(root, hue, t) { // la teinte descend génération après génération
-  setHue(root, hue, t);
-  for (const [d, g] of descendants(root)) setHue(d, hue, t + .2 * g);
+/* ---------- Pigments ----------
+   Une cellule teinte par l'utilisateur garde son pigment et le transmet à sa lignée ; sinon elle prend celui de sa
+   mère, ou, orpheline, sa teinte d'origine sans pigment. Quand le pigment change, il se diffuse dans le cytoplasme
+   en une vague partie du point d'entrée (la goutte absorbée, ou le côté de la mère), et le noyau change quand elle l'atteint. */
+const DYE = .2, DYE_T = .9;                 // part du pigment dans le cytoplasme ; durée de la vague (s)
+const rgbStr = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const mixRGB = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
+function effHue(c) {
+  if (c.own != null) return [c.own, true];
+  const m = motherOf(c);
+  return m ? [m.hue, !!m.dye] : [c.native, false];
+}
+function writtenK(c, t) { // une cellule écrite prend un peu de sa teinte dans le cytoplasme (en douceur quand le texte se forme)
+  if (!c.text && c !== editing) return 0;
+  return c.textAnim && c !== editing ? clamp((t - c.textAnim.tc) / .6, 0, 1) : 1;
+}
+const cytoK = (c, wr) => Math.max(c.dye ? DYE : 0, .13 * wr);
+function cytoRGB(c, t) { // couleur uniforme du cytoplasme à cet instant
+  const fx = c.dyeFx;
+  if (fx && t < fx.t0 + DYE_T) return t < fx.t0 ? fx.from : mixRGB(colors.cellRGB, colors.hues[c.hue], cytoK(c, writtenK(c, t)));
+  return mixRGB(colors.cellRGB, tintOf(c, t), cytoK(c, writtenK(c, t)));
+}
+function passHue(root, hue, t, a = null) { // le pigment descend génération après génération ; un pigment propre arrête la descente
+  const walk = (c, t0, ang) => {
+    const [h, dye] = effHue(c);
+    if (h !== c.hue || dye !== !!c.dye) {
+      c.dyeFx = { from: cytoRGB(c, now()), t0, a: ang };
+      c.dye = dye;
+      setHue(c, h, t0 + .25 * DYE_T);       // le noyau change quand la vague l'atteint
+    }
+    for (const l of links) if (l.a === c && !l.b.dying) walk(l.b, t0 + .3, Math.atan2(c.y - l.b.y, c.x - l.b.x));
+  };
+  walk(root, t, a);
 }
 let focused = null;
 function relight() { // allume la descendance de la cellule choisie, éteint le reste
@@ -709,7 +742,8 @@ function budOff(m, t) {
   for (const k of ['kind', 'r', 'w', 'h', 'cr', 'k', 'ph', 'L', 'headW', 'shaftW', 'H', 'th', 'turn']) if (m[k] !== undefined) shape[k] = m[k];
   if (m.verts && m.kind !== 'arrow') shape.verts = m.verts.map(p => p.slice());
   const d = makeCell(m.x, m.y, shape), [l, r, top, b] = d.ext;
-  d.scale = 1; d.sv = 0; d.hue = m.hue; d.tr = null; // même teinte que sa mère dès la naissance
+  d.scale = 1; d.sv = 0; d.hue = m.hue; d.dye = m.dye; d.tr = null; // même teinte et même pigment que sa mère dès la naissance
+  for (const k of ['fi', 'si', 'bold', 'italic', 'under', 'strike']) d[k] = m[k]; // et même style de texte
   const kids = links.filter(k => k.a === m && k.b !== d && !k.b.hidden && !k.b.dying).map(k => k.b);
   let x, y;
   if (kids.length) { // sous la sœur la plus basse
@@ -1596,10 +1630,19 @@ function magnet(dt, dragging, deferred) {
    mouvement amorti ; elle s'en libère quand on continue de tourner. */
 let turner = null, turnHover = false;
 function spinTo(c, a) { spin(c, a - (c.turn || 0)); c.turn = a; }
-function turnHandle(c) { // coin haut-droit du cadre propre de la forme, qui tourne avec elle
+function toolRadius(c) { // cercle imaginaire des outils : il entoure la forme, à distance constante, et suit en douceur quand elle grandit
+  let R0 = 0; for (let i = 0; i < c.n; i++) R0 = Math.max(R0, Math.hypot(c.bx[i], c.by[i]));
+  const R = R0 * scaleOf(c) + VES_GAP, t = now();
+  if (c.ringR == null || reduce || t - c.ringT > .5) c.ringR = R;
+  else if (t > c.ringT) c.ringR += (R - c.ringR) * (1 - Math.exp(-(t - c.ringT) * 9));
+  c.ringT = t;
+  return c.ringR;
+}
+function turnHandle(c) { // marques de rotation : sur le cercle des outils, dans la direction du coin haut-droit, qui tourne avec la forme
   if (c.kind === 'circle' || !c.ext0) return null;  // un rond tourné reste le même rond : pas de poignée
   const s = scaleOf(c), a = c.turn || 0, C = Math.cos(a), S = Math.sin(a), lx = c.ext0[1] * s, ly = -c.ext0[2] * s;
-  return { x: c.x + lx * C - ly * S, y: c.y + lx * S + ly * C, dir: a - Math.PI / 4 };
+  const ang = Math.atan2(lx * S + ly * C, lx * C - ly * S), R = toolRadius(c) - 11; // les deux arcs encadrent le cercle
+  return { x: c.x + Math.cos(ang) * R, y: c.y + Math.sin(ang) * R, dir: ang };
 }
 function turnHit(c, x, y) { // zone de 44 px autour des marques
   const K = !c.hidden && !c.dying && turnHandle(c);
@@ -1624,6 +1667,191 @@ function turning(dt) {
   if (!(gesture && gesture.kind === 'turn') && Math.abs(m.e) < 1e-3 && Math.abs(m.v) < 1e-2) { spinTo(m.c, m.target); turner = null; }
   return !!turner;
 }
+/* ---------- Anneau d'outils de la cellule qui tremble ----------
+   Sur un cercle imaginaire autour de la forme : les marques de rotation, puis quatre billes rangées à leur suite,
+   couleur, typographie, taille et style. Une bille touchée déplie ses choix vers l'extérieur, en s'éloignant des
+   marques : des gouttes de pigment pour la couleur, des pétales pour le texte, dont les mots rayonnent depuis la
+   cellule comme une fleur. Une seule bille dépliée à la fois ; touchée de nouveau, elle replie ses choix.
+   Les choix sont immobiles. */
+const VES_R = 8, VES_GAP = 26, PIGMENTS = 9, CAR_R = 11;
+const TOOLS = ['color', 'font', 'size', 'style'];
+let dyeing = null;                        // goutte en cours d'absorption : { c, i, t0 }
+function toolRing(c, t) { // place des billes : à la suite des marques ; sens choisi à l'éclosion, revu après une rotation
+  const K = turnHandle(c), mA = K ? K.dir : -Math.PI / 4, R = toolRadius(c), V = c.car;  // un rond, sans marques : en haut à droite
+  const beadsAt = dir => TOOLS.map((_, k) => mA + dir * (32 + 30 * k) / R);
+  if (!V || V.key !== c.selT || (Math.abs(angDist(mA, V.mA)) > .3 && !(gesture && gesture.kind === 'turn'))) {
+    const avoid = links.filter(l => (l.a === c || l.b === c) && !l.a.hidden && !l.b.hidden).map(l => { const o = l.a === c ? l.b : l.a; return Math.atan2(o.y - c.y, o.x - c.x); });
+    let best = 1, bs = -Infinity;
+    for (const dir of [1, -1]) {
+      const B = beadsAt(dir), Ro = R + 32, pts = [...B.map(a => [a, R]), ...Array.from({ length: PIGMENTS }, (_, k) => [B[0] + dir * 24 * k / Ro, Ro]), [B[3] + dir * 26 * 3 / (R + 24), R + 74]];
+      const inside = pts.every(([a, r]) => { const x = c.x + Math.cos(a) * r, y = c.y + Math.sin(a) * r; return x > 14 && x < W - 14 && y > barBottom() + 14 && y < Hh - 14; });
+      const hit = avoid.filter(o => B.some(a => Math.abs(angDist(o, a)) < 14 / R + .12)).length;  // bille posée sur un lien
+      const sc = (inside ? 0 : -10) - hit;
+      if (sc > bs + 1e-6) { bs = sc; best = dir; }
+    }
+    c.car = { key: c.selT, mA, dir: best };
+  }
+  return { mA, R, dir: c.car.dir, B: beadsAt(c.car.dir) };
+}
+function toolState(c) { return c.tools && c.tools.key === c.selT ? c.tools : null; }
+function optLabels(tool) { // libellé et police de chaque choix : le mot s'écrit dans le style qu'il propose
+  if (tool === 'font') return FONTS.map(([n, f]) => ({ text: n, font: `500 13px ${f}` }));
+  if (tool === 'size') return SIZES.map((k, i) => ({ text: 'Aa', font: `500 ${[10, 12.5, 15.5, 19][i]}px ${FONT_FAMILY}` }));
+  if (tool === 'style') return STYLES.map(([n, k]) => ({ text: n, font: `${k === 'italic' ? 'italic ' : ''}${k === 'bold' ? 700 : 500} 13px ${FONT_FAMILY}`, deco: k }));
+  return null;
+}
+function optOn(c, tool, i) { // choix actuel de la cellule
+  if (tool === 'color') return i === (c.own == null ? 0 : c.own + 1);
+  if (tool === 'font') return i === (c.fi || 0);
+  if (tool === 'size') return i === (c.si ?? 1);
+  return !!c[STYLES[i][1]];
+}
+function unfoldU(c, tool, k, n, t) { // avancée du dépliement du k-ième choix (0 replié, 1 en place)
+  const S = toolState(c);
+  if (!S) return 0;
+  if (reduce) return S.open === tool ? 1 : 0;
+  if (S.open === tool) return clamp((t - S.t0 - .03 * k) / .35, 0, 1);
+  if (S.last === tool) return 1 - clamp((t - S.lt0 - .02 * (n - 1 - k)) / .22, 0, 1);
+  return 0;
+}
+function ringLayout(c, t) { // billes, puis choix de la bille dépliée (ou qui se replie)
+  const T = toolRing(c, t), ip = reduce ? 1 : clamp((t - (c.selT || 0) - .1) / .3, 0, 1);
+  const beads = TOOLS.map((tool, k) => { const p = clamp(ip * 1.4 - k * .12, 0, 1), a = T.B[k];
+    return { tool, a, x: c.x + Math.cos(a) * T.R, y: c.y + Math.sin(a) * T.R, r: CAR_R * (p >= 1 ? 1 : Math.max(0, backOut(p))) }; });
+  const opts = [];
+  for (const [k, tool] of TOOLS.entries()) {
+    const b = T.B[k], labels = optLabels(tool), n = labels ? labels.length : PIGMENTS;
+    if (!unfoldU(c, tool, 0, n, t) && !unfoldU(c, tool, n - 1, n, t)) continue;
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      const u = unfoldU(c, tool, i, n, t);
+      if (u <= 0) continue;
+      const S = toolState(c), e = u >= 1 ? 1 : S.open === tool ? backOut(u) : u * u * (3 - 2 * u);
+      if (tool === 'color') { // gouttes, sur un cercle extérieur
+        const Ro = T.R + 32, a = b + T.dir * 24 * i / Ro, aa = b + (a - b) * e, rr = T.R + (Ro - T.R) * Math.min(1, e);
+        let x = c.x + Math.cos(aa) * rr, y = c.y + Math.sin(aa) * rr, r = VES_R * (.35 + .65 * Math.min(1, e));
+        if (dyeing && dyeing.c === c && dyeing.i === i && u >= 1) { // absorbée par la membrane, puis elle repousse à sa place
+          const q = t - dyeing.t0;
+          if (q < .3) { const f = q / .3, P = pointAtAngle(c, a, t); x += (P.x - x) * f * f; y += (P.y - y) * f * f; r *= 1 - f * f; }
+          else if (q < .7) r = 0;
+          else r *= Math.min(1, Math.max(0, backOut(clamp((q - .75) / .35, 0, 1))));
+        }
+        opts.push({ tool, i, a, x, y, r, u, kind: 'drop' });
+      } else { // pétales : un mot qui rayonne, perpendiculaire à la tangente
+        const Ri = T.R + 24, a = b + T.dir * 26 * i / Ri, aa = b + (a - b) * e;
+        ctx.font = labels[i].font;
+        const len = Math.max(30, ctx.measureText(labels[i].text).width + 18), rc = Ri + len / 2;
+        const rr = T.R + (rc - T.R) * Math.min(1, e), sc = .35 + .65 * Math.min(1, e);
+        opts.push({ tool, i, a, x: c.x + Math.cos(aa) * rr, y: c.y + Math.sin(aa) * rr, ang: aa, len: len * sc, th: 22 * sc, u, kind: 'petal', label: labels[i] });
+      }
+    }
+    ctx.restore();
+  }
+  return { beads, opts, T };
+}
+function beadAt(c, x, y) { // une bille, à 18 px près
+  if (!c || c.hidden || c.dying) return null;
+  return ringLayout(c, now()).beads.find(b => b.r > 4 && Math.hypot(x - b.x, y - b.y) <= 18) || null;
+}
+function optAt(c, x, y) { // un choix déplié : goutte (à 13 px près) ou pétale (dans sa forme)
+  if (!c || c.hidden || c.dying || !toolState(c) || !toolState(c).open) return null;
+  for (const o of ringLayout(c, now()).opts) {
+    if (o.u < 1) continue;
+    if (o.kind === 'drop') { if (o.r > 4 && Math.hypot(x - o.x, y - o.y) < 13) return o; continue; }
+    const dx = x - o.x, dy = y - o.y, lx = dx * Math.cos(o.ang) + dy * Math.sin(o.ang), ly = -dx * Math.sin(o.ang) + dy * Math.cos(o.ang);
+    if (Math.abs(lx) <= o.len / 2 + 3 && Math.abs(ly) <= o.th / 2 + 3) return o;
+  }
+  return null;
+}
+function toggleTool(c, tool, t) { // une seule bille dépliée : celle qu'on touche, ou aucune si elle l'était déjà
+  const S = toolState(c), was = S && S.open;
+  c.tools = { key: c.selT, open: was === tool ? null : tool, t0: t, last: was || null, lt0: t };
+  if (navigator.vibrate) navigator.vibrate(6);
+  wake();
+}
+function applyPigment(c, i, a, t) { // la goutte est avalée ; le pigment (ou l'eau) se diffuse, puis descend la lignée
+  dyeing = { c, i, t0: t };
+  c.own = i === 0 ? null : i - 1;
+  passHue(c, null, t + .28, a);
+  kickAt(c, a, -55); c.vib = t + .28; c.vibAmp = 1.4; c.halo = t + .3;
+  if (navigator.vibrate) navigator.vibrate(8);
+  wake();
+}
+function applyText(c, tool, i, a, t) { // typographie, taille ou style : le texte se reforme lettre après lettre
+  if (tool === 'font') c.fi = i;
+  else if (tool === 'size') c.si = i;
+  else { const k = STYLES[i][1]; c[k] = !c[k]; }
+  c._tl = null; fieldKey = '';
+  if (c.text) {
+    fitText(c);
+    const n = (c.text.match(/\S/g) || []).length, stagger = Math.min(.03, .5 / Math.max(1, n));
+    c.textAnim = { old: 0, tc: t, stagger, end: t + .05 + n * stagger + .45 };
+  }
+  kickAt(c, a, -30); c.vib = t; c.vibAmp = 1;
+  if (navigator.vibrate) navigator.vibrate(6);
+  wake();
+}
+function drawDrop(x, y, r, i) { // une goutte : pigment et reflet ; l'eau, transparente, cerclée
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
+  if (i === 0) { ctx.fillStyle = colors.cell; ctx.fill(); ctx.strokeStyle = colors.membrane; ctx.lineWidth = 1.25; ctx.stroke(); }
+  else { ctx.fillStyle = rgbStr(colors.hues[i - 1], .95); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(x - r * .32, y - r * .36, r * .34, r * .24, -.5, 0, TAU);
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fill();
+}
+function drawBeadIcon(c, b) { // ce que porte chaque bille
+  const k = b.r / CAR_R;
+  ctx.fillStyle = colors.label; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (b.tool === 'color') { // trois gouttes en grappe, la première du pigment actuel
+    const cur = c.own == null ? 0 : c.own + 1, trio = [cur || 1, cur === 3 ? 2 : 3, cur === 4 ? 5 : 4];
+    trio.forEach((h, j) => { const a = -Math.PI / 2 + j * TAU / 3; drawDrop(b.x + Math.cos(a) * 4.6 * k, b.y + Math.sin(a) * 4.6 * k, 3.1 * k, h); });
+  } else if (b.tool === 'font') { ctx.font = `500 ${10 * k}px ${FONTS[c.fi || 0][1]}`; ctx.fillText('Aa', b.x, b.y + .5); }
+  else if (b.tool === 'size') {
+    ctx.font = `600 ${7 * k}px ${FONT_FAMILY}`; ctx.fillText('A', b.x - 3.6 * k, b.y + 1.6 * k);
+    ctx.font = `600 ${12 * k}px ${FONT_FAMILY}`; ctx.fillText('A', b.x + 2.8 * k, b.y + .4);
+  } else {
+    ctx.font = `700 ${11 * k}px ${FONT_FAMILY}`; ctx.fillText('B', b.x, b.y);
+    ctx.strokeStyle = colors.label; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(b.x - 4 * k, b.y + 6 * k); ctx.lineTo(b.x + 4 * k, b.y + 6 * k); ctx.stroke();
+  }
+}
+function drawTools(c, t) {
+  const { beads, opts, T } = ringLayout(c, t), S = toolState(c);
+  ctx.save();
+  for (const b of beads) { // les billes, et leur encoche : vers l'extérieur repliées, retournée une fois dépliées
+    if (b.r < .5) continue;
+    const open = !!(S && S.open === b.tool);
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fillStyle = colors.cell; ctx.fill(); ctx.strokeStyle = open ? colors.glow : colors.membrane; ctx.lineWidth = 1.25; ctx.stroke();
+    drawBeadIcon(c, b);
+    const g = S && (S.open === b.tool || S.last === b.tool) ? clamp((t - S.t0) / .3, 0, 1) : 0, flip = open ? g : S && S.last === b.tool ? 1 - g : 0;
+    const rr = T.R + b.r + 5, cx = c.x + Math.cos(b.a) * rr, cy = c.y + Math.sin(b.a) * rr;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.a + Math.PI * flip); ctx.globalAlpha = b.r / CAR_R;
+    ctx.beginPath(); ctx.moveTo(-1.2, -3); ctx.lineTo(1.6, 0); ctx.lineTo(-1.2, 3);
+    ctx.strokeStyle = colors.membrane; ctx.lineWidth = 1.4; ctx.lineCap = ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+  }
+  for (const o of opts) { // les choix dépliés
+    const on = optOn(c, o.tool, o.i);
+    if (o.kind === 'drop') {
+      if (o.r < .3) continue;
+      drawDrop(o.x, o.y, o.r, o.i);
+      if (on && o.u >= 1 && o.r > 4) { ctx.beginPath(); ctx.arc(o.x, o.y, o.r + 3.5, 0, TAU); ctx.strokeStyle = colors.membrane; ctx.lineWidth = 1.25; ctx.stroke(); }
+      continue;
+    }
+    const al = Math.min(1, o.u * 1.4);
+    ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.ang); ctx.globalAlpha = al;
+    ctx.beginPath(); ctx.roundRect(-o.len / 2, -o.th / 2, o.len, o.th, o.th / 2);       // pétale : une capsule allongée le long du rayon
+    ctx.fillStyle = colors.cell; ctx.fill(); ctx.strokeStyle = on ? colors.glow : colors.membrane; ctx.lineWidth = on ? 1.6 : 1.1; ctx.stroke();
+    if (Math.cos(o.ang) < 0) ctx.rotate(Math.PI);                                         // jamais à l'envers : à gauche, le mot se lit vers la cellule
+    const sc = o.th / 22; ctx.scale(sc, sc);
+    ctx.font = o.label.font; ctx.fillStyle = colors.label; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.label.text, 0, .5);
+    if (o.label.deco === 'under' || o.label.deco === 'strike') {
+      const w = ctx.measureText(o.label.text).width, y = o.label.deco === 'under' ? 6.5 : .8;
+      ctx.strokeStyle = colors.label; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-w / 2, y); ctx.lineTo(w / 2, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
 function drawTurn(c, t) { // deux petites marques courbes au coin : la pièce est en mouvement
   const K = turnHandle(c);
   if (!K) return;
@@ -1644,6 +1872,15 @@ const TEXT_MAX = 20, TEXT_MIN = 12, LINE = 1.22;
 let editing = null, fieldKey = '', wantFocus = false, inputType = 'mouse', editFrom = '';
 const FONT_FAMILY = getComputedStyle(document.documentElement).getPropertyValue('--font').trim();
 const textFont = size => `500 ${size}px ${FONT_FAMILY}`;
+// Style du texte d'une cellule : typographie, taille (facteur), gras, italique, souligné, barré
+const FONTS = [['Système', FONT_FAMILY], ['Helvetica', '"Helvetica Neue", Helvetica, Arial, sans-serif'],
+  ['Serif', 'ui-serif, "New York", Georgia, "Times New Roman", serif'], ['Didot', 'Didot, "Bodoni 72", "Bodoni MT", Georgia, serif'],
+  ['Arrondie', 'ui-rounded, "SF Pro Rounded", "Avenir Next Rounded", "Arial Rounded MT Bold", sans-serif'], ['Mono', 'ui-monospace, "SF Mono", Menlo, Consolas, monospace']];
+const SIZES = [.8, 1, 1.3, 1.7];
+const STYLES = [['Gras', 'bold'], ['Italique', 'italic'], ['Souligné', 'under'], ['Barré', 'strike']];
+const sizeK = c => SIZES[c.si ?? 1];
+const cellFont = (c, size) => `${c.italic ? 'italic ' : ''}${c.bold ? 700 : 500} ${size}px ${FONTS[c.fi || 0][1]}`;
+const styleKey = c => `${c.fi || 0}${c.si ?? 1}${c.bold ? 1 : 0}${c.italic ? 1 : 0}`;
 function textBox(c) { // zone droite logée dans la forme, avant l'échelle d'animation ; le texte reste à l'horizontale
   let w, h, dy = 0;
   if (c.kind === 'circle') w = h = 1.38 * c.r;
@@ -1678,11 +1915,12 @@ function wrapText(text, width) { // coupe aux espaces, aux retours à la ligne, 
   }
   return { lines, broke };
 }
-function layoutText(text, box) { // la plus grande taille qui tient ; sinon 12 px, en débordant
+function layoutText(text, box, c) { // la plus grande taille qui tient ; sinon la plus petite, en débordant (bornes selon la taille choisie)
   ctx.save();
   let out = null;
-  for (let size = TEXT_MAX; size >= TEXT_MIN; size--) { // un mot n'est coupé qu'en dernier recours, à la plus petite taille
-    ctx.font = textFont(size);
+  const k = c ? sizeK(c) : 1, hi = Math.round(TEXT_MAX * k), lo = Math.round(TEXT_MIN * k);
+  for (let size = hi; size >= lo; size--) { // un mot n'est coupé qu'en dernier recours, à la plus petite taille
+    ctx.font = c ? cellFont(c, size) : textFont(size);
     const { lines, broke } = wrapText(text, box.w);
     out = { size, lines, over: broke || lines.length * size * LINE > box.h };
     if (!out.over) break;
@@ -1691,8 +1929,8 @@ function layoutText(text, box) { // la plus grande taille qui tient ; sinon 12 p
   return out;
 }
 function textLayout(c) { // mise en page gardée tant que le texte et la zone ne changent pas
-  const box = textBox(c), text = c.text || '', key = text + '|' + Math.round(box.w) + 'x' + Math.round(box.h);
-  if (!c._tl || c._tl.key !== key) c._tl = { key, box, ...layoutText(text, box) };
+  const box = textBox(c), text = c.text || '', key = text + '|' + Math.round(box.w) + 'x' + Math.round(box.h) + '|' + styleKey(c);
+  if (!c._tl || c._tl.key !== key) c._tl = { key, box, ...layoutText(text, box, c) };
   return c._tl;
 }
 function swell(c, f) { // la cellule grandit d'une ondulation pour loger son texte (homothétie)
@@ -1711,7 +1949,7 @@ function fitText(c) { // pendant la saisie : si le texte déborde à 12 px, la c
   if (!L.over) return;
   const box = textBox(c);
   let f = 1;
-  while (f < 2.6 && (box.w * f) < 420) { f *= 1.06; if (!layoutText(c.text, { w: box.w * f, h: box.h * f }).over) break; }
+  while (f < 2.6 && (box.w * f) < 420) { f *= 1.06; if (!layoutText(c.text, { w: box.w * f, h: box.h * f }, c).over) break; }
   if (f > 1.001) { swell(c, f); c.vib = now(); c.vibAmp = 1.2; }
 }
 function inShape(c, x, y) { // point dans la membrane (à 4 px près)
@@ -1721,16 +1959,17 @@ function inShape(c, x, y) { // point dans la membrane (à 4 px près)
 function placeField() { // le champ suit sa cellule et la couvre, sans la dépasser : un appui hors d'elle termine la saisie
   const c = editing;
   if (!c) return;
-  const L = textLayout(c), s = scaleOf(c), size = Math.max(TEXT_MIN, L.size * s), list = isList(c.text);
+  const L = textLayout(c), s = scaleOf(c), size = Math.max(Math.round(TEXT_MIN * sizeK(c)), L.size * s), list = isList(c.text);
   let tw = Math.max(90, L.box.w * s);
-  if (list) { ctx.save(); ctx.font = textFont(L.size); tw = blockW(L.lines) * s + 2; ctx.restore(); } // liste : le champ épouse son bloc, aligné à gauche
+  if (list) { ctx.save(); ctx.font = cellFont(c, L.size); tw = blockW(L.lines) * s + 2; ctx.restore(); } // liste : le champ épouse son bloc, aligné à gauche
   const [el, er, et, eb] = c.ext, bw = (el + er) * s, bh = (et + eb) * s;
   const fw = Math.min(W - 16, Math.max(tw, bw)), fh = Math.max(size * LINE + 8, bh); // zone de saisie : le cadre de la cellule
   const cx = c.x + L.box.dx, cy = c.y + L.box.dy;
-  const key = [Math.round(cx), Math.round(cy), Math.round(tw), Math.round(fw), Math.round(fh), size.toFixed(1), c.fold ? 0 : 1, list ? 1 : 0].join();
+  const key = [Math.round(cx), Math.round(cy), Math.round(tw), Math.round(fw), Math.round(fh), size.toFixed(1), c.fold ? 0 : 1, list ? 1 : 0, styleKey(c), c.under ? 1 : 0, c.strike ? 1 : 0].join();
   if (key === fieldKey) return;
   fieldKey = key;
-  field.style.font = textFont(size); field.style.lineHeight = LINE; field.style.textAlign = list ? 'left' : '';
+  field.style.font = cellFont(c, size); field.style.lineHeight = LINE; field.style.textAlign = list ? 'left' : '';
+  field.style.textDecoration = [c.under ? 'underline' : '', c.strike ? 'line-through' : ''].join(' ').trim() || 'none';
   field.style.width = fw + 'px'; field.style.paddingLeft = field.style.paddingRight = (fw - tw) / 2 + 'px';
   const r = document.createRange(); r.selectNodeContents(field); // hauteur du texte saisi, pour le centrer dans la zone
   const th = field.textContent ? Math.max(size * LINE, r.getBoundingClientRect().height) : size * LINE;
@@ -1823,12 +2062,20 @@ function drawText(c, t, mx, my) { // le texte suit le centre de la cellule, et s
   const L = textLayout(c), s = scaleOf(c), lh = L.size * LINE;
   ctx.save();
   ctx.translate(c.x + (L.box.dx + mx * .5) * s, c.y + (L.box.dy + my * .5) * s); ctx.scale(s, s);
-  ctx.font = textFont(L.size); ctx.fillStyle = colors.label; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = cellFont(c, L.size); ctx.fillStyle = colors.label; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const A = c.textAnim && t < c.textAnim.end ? c.textAnim : null;
   if (!A) {
     const lines = shownLines(L), y0 = -(lines.length - 1) * lh / 2;
-    if (isList(c.text)) { ctx.textAlign = 'left'; const x = -blockW(lines) / 2; lines.forEach((ln, i) => ctx.fillText(ln, x, y0 + i * lh)); }
+    const bw = isList(c.text) ? blockW(lines) : 0;
+    if (bw) { ctx.textAlign = 'left'; lines.forEach((ln, i) => ctx.fillText(ln, -bw / 2, y0 + i * lh)); }
     else lines.forEach((ln, i) => ctx.fillText(ln, 0, y0 + i * lh));
+    if (c.under || c.strike) { // souligné, barré : un trait fin par ligne
+      ctx.strokeStyle = colors.label; ctx.lineWidth = Math.max(1, L.size * .07);
+      lines.forEach((ln, i) => {
+        const w = ctx.measureText(ln).width, x0 = bw ? -bw / 2 : -w / 2, y = y0 + i * lh;
+        for (const dy of [c.under ? L.size * .52 : null, c.strike ? L.size * .06 : null]) if (dy != null) { ctx.beginPath(); ctx.moveTo(x0, y + dy); ctx.lineTo(x0 + w, y + dy); ctx.stroke(); }
+      });
+    }
   } else { // le texte se forme lettre après lettre : il grandit, prend corps, et passe de la teinte de la cellule à l'encre du texte
     ctx.textAlign = 'left';
     const tint = tintOf(c, t), lab = colors.labelRGBA;
@@ -2139,7 +2386,7 @@ function stepMotes(dt, t) {
   for (const b of batches) {
     const c = b.c, s = scaleOf(c), R = Math.max(12, c.size * .7 * s), age = t - b.t0;
     let G = null;
-    if (b.tc && c._tl) { ctx.save(); ctx.font = textFont(c._tl.size); G = glyphLayout(c, c._tl, b.A).filter(g => g.fresh); ctx.restore(); }
+    if (b.tc && c._tl) { ctx.save(); ctx.font = cellFont(c, c._tl.size); G = glyphLayout(c, c._tl, b.A).filter(g => g.fresh); ctx.restore(); }
     const L = c._tl, ox = c.x + (L ? L.box.dx * s : 0), oy = c.y + (L ? L.box.dy * s : 0);
     for (const m of b.motes) {
       if (b.fail || reduce) { m.a -= dt * 5; continue; }
@@ -2484,9 +2731,21 @@ function draw(t) {
     if (c.lift > .01) { // cellule soulevée : ombre portée
       ctx.shadowColor = colors.shadow; ctx.shadowBlur = 20 * c.lift * DPR; ctx.shadowOffsetY = 6 * c.lift * DPR;
     }
-    const written = !!c.text || c === editing, tw = tintOf(c, t); // une cellule écrite prend sa teinte dans le cytoplasme, et perd son noyau
-    const wr = !written ? 0 : c.textAnim && c !== editing ? clamp((t - c.textAnim.tc) / .6, 0, 1) : 1; // en douceur quand le texte se forme
-    ctx.fillStyle = wr ? `rgb(${colors.cellRGB.map((v, i) => v + (tw[i] - v) * .13 * wr | 0)})` : colors.cell; ctx.fill();
+    const wr = writtenK(c, t), fx = c.dyeFx; // une cellule écrite, ou teinte, colore son cytoplasme ; écrite, elle perd son noyau
+    if (fx && t < fx.t0 + DYE_T) { // vague de pigment : l'ancienne couleur, que la nouvelle gagne depuis le point d'entrée
+      ctx.fillStyle = rgbStr(fx.from); ctx.fill();
+      const p = clamp((t - fx.t0) / DYE_T, 0, 1);
+      if (p > 0) {
+        const to = mixRGB(colors.cellRGB, colors.hues[c.hue], cytoK(c, wr)), s = scaleOf(c);
+        const E = fx.a == null ? { x: c.x, y: c.y } : pointAtAngle(c, fx.a, t);
+        const R = (2 * Math.max(...c.ext) * s + 12) * (1 - (1 - p) ** 3), soft = Math.max(8, R * .45);
+        const gr = ctx.createRadialGradient(E.x, E.y, Math.max(0, R - soft), E.x, E.y, R + .01);
+        gr.addColorStop(0, rgbStr(to)); gr.addColorStop(1, rgbStr(to, 0));
+        ctx.save(); ctx.shadowColor = 'transparent'; ctx.clip();
+        ctx.fillStyle = gr; ctx.fillRect(E.x - R - 1, E.y - R - 1, 2 * R + 2, 2 * R + 2);
+        ctx.restore();
+      }
+    } else { ctx.fillStyle = cytoK(c, wr) ? rgbStr(cytoRGB(c, t)) : colors.cell; ctx.fill(); }
     ctx.restore();
     const edge = (hover && hover.c === c && hover.part !== 'body') || (reduce && c.selected) || c === focused || c === inkTarget; // bord ou encoche survolés, cellule qui va recevoir un mot
     ctx.strokeStyle = edge ? colors.glow : colors.membrane; ctx.lineWidth = edge ? 2 : 1.25; ctx.stroke();
@@ -2499,7 +2758,7 @@ function draw(t) {
     drawText(c, t, mx / c.n, my / c.n);
     drawEncoche(c, t, tc);
   }
-  if (source && !source.hidden && !source.dying) drawTurn(source, t);
+  if (source && !source.hidden && !source.dying) { drawTurn(source, t); drawTools(source, t); }
   drawMotes(t);
   drawInks(t);
   placeField();
@@ -2578,6 +2837,15 @@ cv.addEventListener('pointerdown', e => {
     else if (!word && e.pointerType === 'pen') g.press = setTimeout(() => holdToggle(g), HOLD_WRITE * 1000); // stylet maintenu sur le fond : l'écriture se termine
     wake(); return;
   }
+  const onTurn = source && turnHit(source, x, y), bead = source && !onTurn && beadAt(source, x, y), opt = source && !onTurn && !bead && optAt(source, x, y);
+  if (bead || opt) { // bille : elle déplie ou replie ses choix ; choix : il s'applique à la cellule qui tremble
+    cv.setPointerCapture(e.pointerId); hover = null;
+    gesture = { kind: 'dye', id: e.pointerId, pointerType: e.pointerType };
+    if (bead) toggleTool(source, bead.tool, now());
+    else if (opt.tool === 'color') applyPigment(source, opt.i, opt.a, now());
+    else applyText(source, opt.tool, opt.i, opt.a, now());
+    return;
+  }
   if (source && turnHit(source, x, y)) { // poignée de la cellule choisie : elle tourne avec le doigt
     const c = source;
     cv.setPointerCapture(e.pointerId); hover = null;
@@ -2620,10 +2888,10 @@ cv.addEventListener('pointermove', e => {
   // survol à la souris ou au stylet : on montre ce qu'un appui ferait (le stylet reste suivi même si une paume est posée)
   if (!g || (e.pointerType === 'pen' && g.pointerType !== 'pen' && e.pointerId !== g.id)) {
     if (e.pointerType === 'touch') return;
-    const th = !!source && turnHit(source, e.clientX, e.clientY);
+    const th = !!source && turnHit(source, e.clientX, e.clientY), vs = !!source && (!!beadAt(source, e.clientX, e.clientY) || !!optAt(source, e.clientX, e.clientY));
     if (th !== turnHover) { turnHover = th; wake(); }
-    const z = th ? null : zoneOf(e.clientX, e.clientY), w = inkAt(e.clientX, e.clientY);
-    cv.style.cursor = w ? 'grab' : writeMode ? 'crosshair' : th ? 'grab' : !z ? 'default' : z.part === 'body' ? 'grab' : z.part === 'bud' ? 'pointer' : 'crosshair';
+    const z = th || vs ? null : zoneOf(e.clientX, e.clientY), w = inkAt(e.clientX, e.clientY);
+    cv.style.cursor = w ? 'grab' : writeMode ? 'crosshair' : vs ? 'pointer' : th ? 'grab' : !z ? 'default' : z.part === 'body' ? 'grab' : z.part === 'bud' ? 'pointer' : 'crosshair';
     if (writeMode) { if (hover) { hover = null; wake(); } return; } // en écriture, les cellules ne réagissent pas au survol
     if ((z && z.c) !== (hover && hover.c) || (z && z.part) !== (hover && hover.part)) { hover = z; wake(); }
     return;
@@ -2645,6 +2913,7 @@ cv.addEventListener('pointermove', e => {
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
       for (const ev of evs.length ? evs : [e]) { const last = g.pts[g.pts.length - 1]; if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) >= 1.5) g.pts.push([ev.clientX, ev.clientY, Math.round(ev.timeStamp - g.ts0)]); }
     }
+  } else if (g.kind === 'dye') { // la goutte est bue au posé : rien à suivre
   } else if (g.kind === 'turn') {
     turnAim(g, x, y);
   } else if (g.kind === 'move') {
@@ -2844,7 +3113,7 @@ resize(); readColors();
   makeCell(cx, Math.min(Hh - 70, cy + 170), { kind: 'tri', verts: [[0, -61.3], [60, 30.7], [-60, 30.7]] });
   wake();
 })();
-window.__lab = { inks, inkLines, joinLines, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
+window.__lab = { inks, inkLines, joinLines, ringLayout, effHue, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
                  get gesture() { return gesture; }, get focused() { return focused; }, get source() { return source; }, get idle() { return !raf; } };
 
 /* ---------- Plein écran ----------

@@ -2,7 +2,7 @@
 
 # Laboratoire de fusion
 
-Des cellules vivantes, dessinées à main levée, reliées par des liens de filiation routés en orthogonal. Chaque cellule est une membrane souple qui ondule, réagit aux gestes et transmet ses propriétés à sa descendance. On y écrit au clavier, ou à la main : le mot manuscrit glissé dans une cellule s'y dissout et devient du texte.
+Des cellules vivantes, dessinées à main levée, reliées par des liens de filiation routés en orthogonal. Chaque cellule est une membrane souple qui ondule, réagit aux gestes et transmet ses propriétés à sa descendance. On y écrit au clavier, ou à la main : le mot manuscrit glissé dans une cellule s'y dissout et devient du texte. Une goutte de pigment la teint, des pétales règlent la typographie, la taille et le style de son texte.
 
 Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la version en ligne sur GitHub Pages. Fonctionne à la souris, au doigt et au stylet, sur ordinateur, iPad et iPhone.
 
@@ -21,7 +21,10 @@ Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la
 | Glisser une cellule qui tremble | Déplace toute sa lignée |
 | Appui sur une autre cellule (mode tremblement) | Lui donne la taille de la cellule qui tremble |
 | Glisser une autre cellule (mode tremblement) | L'aligne sur l'axe horizontal ou vertical de la cellule qui tremble |
-| Tirer les marques du coin (mode tremblement) | Fait tourner la cellule |
+| Tirer les marques de rotation (mode tremblement) | Fait tourner la cellule |
+| Appui sur une bille (mode tremblement) | Déplie ou replie ses choix : couleur, typographie, taille ou style |
+| Appui sur une goutte | Teint la cellule et sa lignée ; la goutte d'eau lave le pigment |
+| Appui sur un pétale | Change la typographie, la taille ou le style du texte |
 | Appui sur l'encoche d'une mère | Replie ou déplie ses filles |
 | Trait en travers d'un lien | Coupe le lien |
 | Croix ou rature sur une cellule | Supprime la cellule |
@@ -127,12 +130,35 @@ Un **appui long** (environ une demi-seconde) sur une cellule la fait trembler. U
 
 **Aligner.** Pendant que la cellule tremble, les autres cellules qu'on glisse sont attirées par ses axes horizontal et vertical : quand leur centre passe à moins de 8 px de l'un d'eux, elles s'y calent d'un mouvement amorti, parfaitement alignées, et s'en libèrent au-delà de 16 px. Ces axes l'emportent sur l'aimant des liens.
 
-**Tourner.** Deux petites marques courbes apparaissent au coin de la cellule qui tremble. Les tirer fait tourner la cellule autour de son centre :
+**Tourner.** Deux petites marques courbes apparaissent du côté du coin haut-droit de la cellule qui tremble, sur le cercle des outils (voir plus bas). Les tirer fait tourner la cellule autour de son centre :
 
 - les marques tournent avec la forme, si bien que le doigt garde la prise ;
 - à moins de 5° de l'horizontale ou de la verticale, la forme se cale d'un mouvement amorti, puis s'en libère au-delà de 10° ;
 - pour une flèche, c'est sa direction qui se cale ;
 - un rond n'a pas de marques, puisqu'il reste le même en tournant.
+
+### Les outils
+
+Autour de la cellule qui tremble, un cercle imaginaire porte les marques de rotation puis, à leur suite, quatre billes : **couleur**, **typographie**, **taille** et **style**. Le cercle entoure toute la forme ; il suit la cellule quand elle grandit ou tourne. Les billes se rangent dans le sens où il y a de la place, loin des liens et des bords de l'écran ; un rond, qui n'a pas de marques, les porte en haut à droite.
+
+- **Déplier.** Un appui sur une bille déplie ses choix vers l'extérieur, en s'éloignant des marques, sur un arc de cercle. Une seule bille est dépliée à la fois : en ouvrir une replie l'autre. Un nouvel appui replie ses choix.
+- **Encoche.** Chaque bille porte une petite encoche tournée vers l'extérieur ; elle se retourne quand la bille est dépliée.
+- **Choix immobiles.** Une fois en place, les choix ne bougent plus, même si la cellule tremble.
+
+**Couleur.** La bille porte trois gouttes en grappe, la première du pigment actuel. Elle déplie neuf gouttes : l'eau, puis huit pigments (les six teintes du laboratoire, une terre cuite et une ardoise). Une goutte touchée rentre dans la membrane, qui l'avale ; le pigment se diffuse dans le cytoplasme en une vague partie du point d'entrée, puis le noyau change de couleur quand la vague l'atteint.
+
+- Le pigment descend la lignée, génération après génération ; chez chaque fille, la vague entre du côté de sa mère.
+- Une cellule teinte garde son pigment quand sa mère change de couleur, et le transmet à sa propre lignée.
+- La goutte d'eau lave le pigment : la cellule reprend la couleur de sa mère, ou, sans mère, sa teinte d'origine.
+- Une cellule détachée de sa mère garde le pigment qu'on lui a donné ; sinon elle retrouve sa teinte d'origine.
+
+**Typographie, taille, style.** Leurs choix se déplient en **pétales** : de petites capsules allongées le long du rayon, dont le mot est écrit perpendiculairement à la tangente, comme une fleur ; à gauche du cercle, le mot est retourné pour ne jamais se lire à l'envers. Chaque mot s'écrit dans le style qu'il propose, et le choix actuel est cerclé.
+
+- **Typographie :** Système, Helvetica, Serif, Didot, Arrondie, Mono. Ce sont les polices de l'appareil : sur iPad et Mac elles existent toutes ; ailleurs, une police proche les remplace.
+- **Taille :** quatre tailles, de 0,8 à 1,7 fois la taille habituelle. Le texte garde sa mise en page automatique ; s'il devient trop grand, la cellule grandit pour le loger.
+- **Style :** gras, italique, souligné, barré, qui se cumulent ; chacun s'active ou se retire d'un appui.
+
+Le texte se reforme lettre après lettre dans son nouveau style, et le champ de saisie au clavier prend le même style. Une fille née d'un double appui reprend le style de texte de sa mère.
 
 ## Replier et déplier une famille
 
@@ -172,4 +198,5 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 - Rendu en Canvas 2D ; les membranes sont des chaînes de points reliés par des ressorts, simulées à 240 pas par seconde. L'animation s'arrête dès que la scène est au repos.
 - Routage orthogonal par [libavoid-js](https://github.com/Aksem/libavoid-js), portage WebAssembly de la bibliothèque libavoid du projet Adaptagrams, sous licence LGPL-2.1-or-later. Le module est embarqué dans la page.
 - Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches ; le cœur se reconnaît au creux du milieu de son bord supérieur.
+- Couleur : le pigment se diffuse par un dégradé radial découpé à la forme de la membrane, qui grandit depuis le point d'entrée.
 - Lecture de l'écriture : dans Claude, l'image du mot est envoyée à Claude par la capacité « sample » des artefacts claude.ai, avec le contexte de la carte et les exemples appris, gardés dans le stockage local du navigateur ; ailleurs, les traits datés sont envoyés au service de reconnaissance d'écriture de Google (inputtools.google.com), en français.

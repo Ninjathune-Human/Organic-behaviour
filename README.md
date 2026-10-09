@@ -84,11 +84,11 @@ Le texte se cale dans la forme. S'il déborde, sa taille diminue jusqu'à 12 px,
 
 Lâché dans une cellule, le mot se défait en gouttelettes d'encre qui entrent dans la membrane, s'y diffusent en tournoyant et prennent sa teinte, pendant qu'une onde lente fait le tour de la cellule. Le texte lu s'ajoute à celui de la cellule : chaque gouttelette se condense sur une lettre, qui grandit et prend corps, puis une lueur passe. Seul le résultat final s'affiche, au bout de quelques secondes.
 
-- **Lecteur.** Le mot est rendu en image, noir sur blanc, et lu par Claude avec son modèle standard, plus précis que le modèle rapide.
-- **Contexte.** Claude reçoit aussi le texte déjà présent dans la cellule, celui de sa mère, de ses filles et de ses sœurs, pour trancher entre des lectures proches.
-- **Apprentissage.** Quand un mot est mal lu, le corriger au clavier : son image et sa bonne transcription deviennent un exemple de l'écriture, et les six derniers accompagnent chaque lecture. Une réécriture sans rapport avec la lecture (plus de la moitié des lettres changées) n'est pas apprise. Les exemples restent dans le navigateur.
+- **Lecteur.** Dans Claude, le mot est rendu en image, noir sur blanc, et lu par Claude avec son modèle standard. Ailleurs, sur GitHub Pages par exemple, la page ne peut pas faire appel à Claude : c'est la reconnaissance d'écriture de Google qui lit le mot, à partir de ses traits, de leur ordre et de leur rythme.
+- **Contexte** (dans Claude). Claude reçoit aussi le texte déjà présent dans la cellule, celui de sa mère, de ses filles et de ses sœurs, pour trancher entre des lectures proches.
+- **Apprentissage** (dans Claude). Quand un mot est mal lu, le corriger au clavier : son image et sa bonne transcription deviennent un exemple de l'écriture, et les six derniers accompagnent chaque lecture. Une réécriture sans rapport avec la lecture (plus de la moitié des lettres changées) n'est pas apprise. Les exemples restent dans le navigateur.
 - **Échec.** Si le mot est illisible ou si la lecture n'aboutit pas, les gouttelettes s'évanouissent, le mot réapparaît à sa place et un message dit pourquoi.
-- **Disponibilité.** La lecture passe par Claude : elle fonctionne quand le laboratoire est ouvert comme artefact dans Claude, pas sur GitHub Pages. Elle utilise le compte Claude de la personne qui écrit et demande son accord au premier mot. La saisie au clavier fonctionne partout.
+- **Disponibilité.** Dans Claude, la lecture utilise le compte Claude de la personne qui écrit et demande son accord au premier mot. Hors de Claude, elle passe par un service de Google non officiel, gratuit et sans clé : les traits du mot lui sont envoyés, et il peut cesser de fonctionner sans préavis. La saisie au clavier fonctionne partout.
 
 ## Relier une mère et sa fille
 
@@ -163,4 +163,4 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 - Rendu en Canvas 2D ; les membranes sont des chaînes de points reliés par des ressorts, simulées à 240 pas par seconde. L'animation s'arrête dès que la scène est au repos.
 - Routage orthogonal par [libavoid-js](https://github.com/Aksem/libavoid-js), portage WebAssembly de la bibliothèque libavoid du projet Adaptagrams, sous licence LGPL-2.1-or-later. Le module est embarqué dans la page.
 - Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches ; le cœur se reconnaît au creux du milieu de son bord supérieur.
-- Lecture de l'écriture : l'image du mot est envoyée à Claude par la capacité « sample » des artefacts claude.ai, avec le contexte de la carte et les exemples appris ; les exemples sont gardés dans le stockage local du navigateur.
+- Lecture de l'écriture : dans Claude, l'image du mot est envoyée à Claude par la capacité « sample » des artefacts claude.ai, avec le contexte de la carte et les exemples appris, gardés dans le stockage local du navigateur ; ailleurs, les traits datés sont envoyés au service de reconnaissance d'écriture de Google (inputtools.google.com), en français.

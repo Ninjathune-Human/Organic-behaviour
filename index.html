@@ -1937,9 +1937,7 @@ function inkContext(c) { // ce que la carte dit déjà autour de la cellule
   if (near.length) out.push('ses filles et ses sœurs : ' + near.map(d => q(d.text)).join(', '));
   return out.length ? 'Contexte de la carte : ' + out.join(' ; ') + '. Il aide à trancher entre des lectures proches, mais transcris ce qui est écrit, même hors contexte. ' : '';
 }
-async function readInk(img, context, tier) {
-  const sample = await sampler;
-  if (!sample) throw { code: 'absent' };
+async function readInk(sample, img, context) {
   const lim = sample.limits ? await sample.limits().catch(() => null) : null;
   const room = Math.min(HAND_MAX, ((lim && lim.images && lim.images.maxCount) || 1) - 1), ex = room > 0 ? hand.slice(-room) : [];
   const head = !ex.length ? 'Cette image montre une écriture manuscrite tracée au stylet, en noir sur fond blanc. Transcris exactement le texte écrit. '
@@ -1948,7 +1946,7 @@ async function readInk(img, context, tier) {
       + ex.map((h, i) => `image ${i + 1} : « ${h.text} »`).join(' ; ') + '. Sers-toi de ces exemples pour reconnaître sa façon de former les lettres, puis transcris exactement la dernière image. ';
   const { text } = await sample(head + "C'est le plus souvent un mot ou une courte expression en français, destinée à une cellule de carte mentale. " + context
     + 'Respecte les majuscules, les accents et la ponctuation. Réponds uniquement par le texte transcrit, sur une seule ligne, sans guillemets ni commentaire. '
-    + "Si rien n'est lisible, réponds exactement : ∅", { images: [...ex.map(blobOf), img], modelTier: tier });
+    + "Si rien n'est lisible, réponds exactement : ∅", { images: [...ex.map(blobOf), img], modelTier: 'default' });
   const out = text.replace(/\s+/g, ' ').trim().replace(/^["«“”»\s]+|["«“”»\s]+$/g, '');
   if (!out || out === '∅') throw { code: 'illisible' };
   return out;
@@ -1968,12 +1966,30 @@ function learnFrom(c, was, now) { // un mot lu puis corrigé au clavier : son im
     const pre = was.slice(0, w.start).trim(), post = was.slice(w.start + w.text.length).trim();
     if (!now.startsWith(pre) || !now.endsWith(post) || now.length < pre.length + post.length) continue;
     const fixed = now.slice(pre.length, now.length - post.length).trim();
-    if (fixed && fixed !== w.text && editDist(fixed.toLowerCase(), w.text.toLowerCase()) <= Math.max(2, .5 * Math.max(fixed.length, w.text.length))) learnHand(w.img, fixed);
+    if (fixed && fixed !== w.text && editDist(fixed.toLowerCase(), w.text.toLowerCase()) <= Math.max(2, .5 * Math.max(fixed.length, w.text.length))) { if (w.img) learnHand(w.img, fixed); }
   }
   c.reads = null;                                  // après une retouche, les positions des mots lus ne valent plus
 }
+/* Hors de Claude (GitHub Pages…), la page ne peut pas lui demander de lire : la reconnaissance d'écriture de Google
+   prend le relais. Service non officiel, sans clé ; il lit les traits dans l'ordre et au rythme où ils ont été tracés. */
+const HANDWRITING = 'https://inputtools.google.com/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8';
+async function readGoogle(k) {
+  const b = k.box, r = Math.round;
+  const ink = k.strokes.map(st => [st.map(p => r(p[0] - b.x0)), st.map(p => r(p[1] - b.y0)), st.map(p => p[2] || 0)]);
+  const body = JSON.stringify({ options: 'enable_pre_space', requests: [{ writing_guide: { writing_area_width: r(b.x1 - b.x0) + 1, writing_area_height: r(b.y1 - b.y0) + 1 }, ink, language: 'fr' }] });
+  let res;
+  try { res = await fetch(HANDWRITING, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
+  catch (e) { // refusée avant d'arriver (contrôle d'origine) : elle repart sous sa forme la plus simple
+    try { res = await fetch(HANDWRITING, { method: 'POST', body }); } catch (e2) { throw { code: 'reseau' }; }
+  }
+  const json = res.ok ? await res.json().catch(() => null) : null;
+  if (!json || json[0] !== 'SUCCESS') throw { code: 'upstream_error' };
+  const out = String(((json[1] && json[1][0] && json[1][0][1]) || [])[0] || '').replace(/\s+/g, ' ').trim();
+  if (!out) throw { code: 'illisible' };
+  return out;
+}
 const INK_SAY = {
-  absent: "La lecture de l'écriture passe par Claude : elle ne fonctionne que dans Claude.",
+  reseau: "La lecture de l'écriture n'a pas abouti : vérifiez la connexion, puis réessayez.",
   not_granted: "Pour lire l'écriture, le laboratoire a besoin de votre accord pour utiliser Claude.",
   illisible: 'Écriture illisible : réessayez en écrivant un peu plus grand.',
   rate_limited: 'Trop de lectures à la fois : réessayez dans un instant.',
@@ -2061,7 +2077,10 @@ function absorb(k, c) { // le mot entre dans la cellule, qui le « digère » pe
     c.halo = tc + .05 + n * stagger; c.vib = tc; c.vibAmp = 1.2;  // la lueur vient quand le mot est formé
     c.reading--; wake();
   };
-  inkImage(k).then(img => readInk(img, context, 'default').then(text => place(text, img))).catch(e => { // rien n'est perdu : les gouttelettes s'évanouissent et le mot réapparaît à sa place
+  sampler.then(sample => sample
+    ? inkImage(k).then(img => readInk(sample, img, context).then(text => place(text, img))) // dans Claude : Claude lit l'image du mot
+    : readGoogle(k).then(text => place(text, null))                                      // ailleurs : Google lit les traits
+  ).catch(e => { // rien n'est perdu : les gouttelettes s'évanouissent et le mot réapparaît à sa place
     b.fail = true;
     k.fly = null; k.dx = k.dy = 0; k.appear = now();
     c.reading--; wake();
@@ -2432,7 +2451,7 @@ cv.addEventListener('pointerdown', e => {
   const word = inkAt(x, y);
   if (word || writeMode) { // un mot manuscrit (le soulever), ou l'écriture libre (un nouveau trait)
     cv.setPointerCapture(e.pointerId); hover = null;
-    const g = gesture = { kind: 'ink', grp: word, id: e.pointerId, pointerType: e.pointerType, sx: x, sy: y, pts: [[x, y]], lifted: false };
+    const g = gesture = { kind: 'ink', grp: word, id: e.pointerId, pointerType: e.pointerType, sx: x, sy: y, ts0: e.timeStamp, pts: [[x, y, 0]], lifted: false }; // points datés : le rythme du tracé aide la lecture
     if (word && writeMode) g.press = setTimeout(() => liftInk(g), 350); // en écriture, il faut un appui maintenu : un trait posé sur un mot reste un trait
     else if (!word && e.pointerType === 'pen') g.press = setTimeout(() => holdToggle(g), HOLD_WRITE * 1000); // stylet maintenu sur le fond : l'écriture se termine
     wake(); return;
@@ -2502,7 +2521,7 @@ cv.addEventListener('pointermove', e => {
     else if (writeMode) {
       if (Math.hypot(x - g.sx, y - g.sy) > 6) clearTimeout(g.press);  // il écrit : ce n'est pas un appui maintenu
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
-      for (const ev of evs.length ? evs : [e]) { const last = g.pts[g.pts.length - 1]; if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) >= 1.5) g.pts.push([ev.clientX, ev.clientY]); }
+      for (const ev of evs.length ? evs : [e]) { const last = g.pts[g.pts.length - 1]; if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) >= 1.5) g.pts.push([ev.clientX, ev.clientY, Math.round(ev.timeStamp - g.ts0)]); }
     }
   } else if (g.kind === 'turn') {
     turnAim(g, x, y);

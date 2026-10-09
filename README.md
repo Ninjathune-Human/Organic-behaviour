@@ -2,7 +2,7 @@
 
 # Laboratoire de fusion
 
-Des cellules vivantes, dessinées à main levée, reliées par des liens de filiation routés en orthogonal. Chaque cellule est une membrane souple qui ondule, réagit aux gestes et transmet ses propriétés à sa descendance.
+Des cellules vivantes, dessinées à main levée, reliées par des liens de filiation routés en orthogonal. Chaque cellule est une membrane souple qui ondule, réagit aux gestes et transmet ses propriétés à sa descendance. On y écrit au clavier, ou à la main : le mot manuscrit glissé dans une cellule s'y dissout et devient du texte.
 
 Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la version en ligne sur GitHub Pages. Fonctionne à la souris, au doigt et au stylet, sur ordinateur, iPad et iPhone.
 
@@ -11,14 +11,16 @@ Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la
 | Geste | Effet |
 | --- | --- |
 | Dessiner une forme sur le fond | Crée une cellule de cette forme |
-| Double appui sur une cellule | Fait naître une fille de la même forme |
+| Appui simple sur une cellule | Allume sa lignée ; au doigt ou à la souris, ouvre aussi la saisie au clavier |
+| Double appui sur une cellule | Fait naître une fille de la même forme ; au doigt ou à la souris, son champ de texte s'ouvre |
+| Bouton stylet, ou stylet maintenu sur le fond | Ouvre ou ferme l'écriture à la main |
+| Appui maintenu sur un mot manuscrit, puis glisser | Le dépose dans une cellule, où il devient du texte |
 | Tirer depuis le bord d'une cellule | Relie une mère à sa fille |
 | Glisser l'intérieur | Déplace la cellule |
 | Appui long | Met la cellule en mode tremblement |
 | Glisser une cellule qui tremble | Déplace toute sa lignée |
 | Appui sur une autre cellule (mode tremblement) | Lui donne la taille de la cellule qui tremble |
 | Tirer les marques du coin (mode tremblement) | Fait tourner la cellule |
-| Appui simple sur une mère | Allume sa lignée |
 | Appui sur l'encoche d'une mère | Replie ou déplie ses filles |
 | Trait en travers d'un lien | Coupe le lien |
 | Croix ou rature sur une cellule | Supprime la cellule |
@@ -61,6 +63,32 @@ Un **double appui** sur une cellule, au doigt, au stylet ou à la souris, fait n
 - La première fille se place à côté de la mère, à droite, ou à gauche s'il n'y a pas la place.
 - Les suivantes se rangent sous la sœur la plus basse, en colonne.
 - Une mère dont la famille est repliée la déplie d'abord.
+- Au doigt ou à la souris, le champ de saisie s'ouvre sur la fille : on peut taper son texte aussitôt. Au stylet, rien ne s'ouvre, pour que le double appui reste net.
+
+## Écrire dans les cellules
+
+### Au clavier
+
+Un appui simple sur une cellule, au doigt ou à la souris, ouvre un champ posé sur elle, dans la même typographie que le texte affiché. **Entrée** valide, **Maj + Entrée** va à la ligne, et un appui ailleurs valide aussi. Au stylet, l'appui allume seulement la lignée : le texte s'écrit à la main.
+
+Le texte se cale dans la forme. S'il déborde, sa taille diminue jusqu'à 12 px, puis la cellule grandit juste assez pour le contenir ; au-delà, la dernière ligne visible se termine par des points de suspension. Une cellule écrite perd son noyau et prend une légère teinte.
+
+### À la main
+
+1. **Ouvrir l'écriture libre** : bouton stylet de la barre, ou appui long du stylet sur le fond (le bouton latéral du crayon n'est pas transmis aux pages web). Le même geste la referme.
+2. **Écrire n'importe où** sur la page. Les traits proches, écrits à la suite, forment un mot ; un point sur un i ou une barre de t rejoint le mot qu'il touche.
+3. **Glisser le mot** : appui maintenu sur le mot, il se soulève, puis le glisser. La cellule visée s'éclaire. Hors écriture libre, le mot part dès qu'on le glisse.
+4. **Lâcher** : sur une cellule, le mot y entre ; sur le fond, il reste là ; au bord de la page, il est jeté.
+
+### La lecture
+
+Lâché dans une cellule, le mot se défait en gouttelettes d'encre qui entrent dans la membrane, s'y diffusent en tournoyant et prennent sa teinte, pendant qu'une onde lente fait le tour de la cellule. Le texte lu s'ajoute à celui de la cellule : chaque gouttelette se condense sur une lettre, qui grandit et prend corps, puis une lueur passe. Seul le résultat final s'affiche, au bout de quelques secondes.
+
+- **Lecteur.** Le mot est rendu en image, noir sur blanc, et lu par Claude avec son modèle standard, plus précis que le modèle rapide.
+- **Contexte.** Claude reçoit aussi le texte déjà présent dans la cellule, celui de sa mère, de ses filles et de ses sœurs, pour trancher entre des lectures proches.
+- **Apprentissage.** Quand un mot est mal lu, le corriger au clavier : son image et sa bonne transcription deviennent un exemple de l'écriture, et les six derniers accompagnent chaque lecture. Une réécriture sans rapport avec la lecture (plus de la moitié des lettres changées) n'est pas apprise. Les exemples restent dans le navigateur.
+- **Échec.** Si le mot est illisible ou si la lecture n'aboutit pas, les gouttelettes s'évanouissent, le mot réapparaît à sa place et un message dit pourquoi.
+- **Disponibilité.** La lecture passe par Claude : elle fonctionne quand le laboratoire est ouvert comme artefact dans Claude, pas sur GitHub Pages. Elle utilise le compte Claude de la personne qui écrit et demande son accord au premier mot. La saisie au clavier fonctionne partout.
 
 ## Relier une mère et sa fille
 
@@ -74,7 +102,7 @@ Poser le doigt sur le **bord** d'une cellule, là où la membrane s'éclaire au 
 
 Les liens sont routés en orthogonal autour des cellules, sans les traverser, et se recalculent quand une cellule bouge, tourne ou change de taille.
 
-**Allumer une lignée.** Un appui simple sur une mère allume toutes ses filles, puis leurs filles : une impulsion lumineuse descend le long des liens. Un nouvel appui l'éteint.
+**Allumer une lignée.** Un appui simple sur une cellule allume toutes ses filles, puis leurs filles : une impulsion lumineuse descend le long des liens. Un appui sur le fond l'éteint.
 
 **Couper un lien.** Tracer un trait qui le croise : le lien se rompt au point de coupe et chaque moitié revient comme un élastique dans sa cellule. La fille, devenue orpheline, retrouve sa teinte d'origine et la transmet à sa descendance.
 
@@ -115,6 +143,7 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 | Réglage | Rôle |
 | --- | --- |
 | Plein écran | Affiche le laboratoire sur tout l'écran (sur iPhone, passer par l'écran d'accueil, voir plus bas) |
+| Stylet | Ouvre ou ferme l'écriture à la main |
 | Gestes | Ouvre ou referme l'aide |
 | Ressort | Les liens ondulent comme des ressorts quand leur tracé change |
 | Voies unifiées | Les liens parallèles se tassent en faisceau au lieu de s'étaler dans l'espace libre |
@@ -123,8 +152,9 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 
 ## Sur iPad et iPhone
 
-- **Stylet :** à son approche, le bord de la cellule visée s'éclaire. La paume posée sur l'écran pendant l'écriture est ignorée.
-- **Griffonnage :** cette fonction d'iPadOS, qui transforme l'écriture manuscrite en texte, avale parfois des contacts du stylet, même hors des champs de texte. La page la neutralise sur la scène, et un appui dont seul le lever est arrivé compte quand même. S'il reste des ratés, désactiver Réglages › Apple Pencil › Griffonnage.
+- **Stylet :** à son approche, le bord de la cellule visée s'éclaire. La paume posée sur l'écran pendant l'écriture est ignorée. Un appui long du stylet sur le fond ouvre ou ferme l'écriture à la main.
+- **Griffonnage :** cette fonction d'iPadOS, qui transforme l'écriture manuscrite en texte, avale parfois des contacts du stylet, même hors des champs de texte. La page la neutralise sur la scène, un appui dont seul le lever est arrivé compte quand même, et un geste dont le lever s'est perdu ne bloque pas les suivants. S'il reste des ratés, désactiver Réglages › Apple Pencil › Griffonnage.
+- **Clavier :** s'il fait monter la page pour dégager le champ, elle revient en place dès la fin de la saisie.
 - **Plein écran :** ouvrir l'adresse dans Safari, puis Partager › Sur l'écran d'accueil. Le laboratoire s'ouvre alors comme une application, sans barre de navigation.
 
 ## Sous le capot
@@ -133,3 +163,4 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 - Rendu en Canvas 2D ; les membranes sont des chaînes de points reliés par des ressorts, simulées à 240 pas par seconde. L'animation s'arrête dès que la scène est au repos.
 - Routage orthogonal par [libavoid-js](https://github.com/Aksem/libavoid-js), portage WebAssembly de la bibliothèque libavoid du projet Adaptagrams, sous licence LGPL-2.1-or-later. Le module est embarqué dans la page.
 - Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches ; le cœur se reconnaît au creux du milieu de son bord supérieur.
+- Lecture de l'écriture : l'image du mot est envoyée à Claude par la capacité « sample » des artefacts claude.ai, avec le contexte de la carte et les exemples appris ; les exemples sont gardés dans le stockage local du navigateur.

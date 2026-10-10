@@ -4,14 +4,14 @@
 
 Des cellules vivantes, dessinées à main levée, reliées par des liens de filiation routés en orthogonal. Chaque cellule est une membrane souple qui ondule, réagit aux gestes et transmet ses propriétés à sa descendance. On y écrit au clavier, ou à la main : le mot manuscrit glissé dans une cellule s'y dissout et devient du texte. Une goutte de pigment la teint, des pétales règlent la typographie, la taille et le style de son texte.
 
-Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la version en ligne sur GitHub Pages. Fonctionne à la souris, au doigt et au stylet, sur ordinateur, iPad et iPhone.
+Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la version en ligne sur GitHub Pages. Fonctionne à la souris, au doigt et au stylet, sur ordinateur, iPad et iPhone. La toile est infinie : on y zoome et on s'y déplace à deux doigts, à la molette ou au pavé.
 
 ## Gestes en bref
 
 | Geste | Effet |
 | --- | --- |
 | Dessiner une forme sur le fond | Crée une cellule de cette forme |
-| Appui simple sur une cellule | Allume sa lignée ; au doigt ou à la souris, ouvre aussi la saisie au clavier |
+| Appui simple sur une cellule | Allume sa lignée et ouvre la saisie ; au stylet, une fois passé le double appui possible |
 | Double appui sur une cellule | Fait naître une fille de la même forme ; au doigt ou à la souris, son champ de texte s'ouvre |
 | Bouton stylet, ou stylet maintenu sur le fond | Ouvre ou ferme l'écriture à la main |
 | Appui maintenu sur un mot manuscrit, puis glisser | Le dépose dans une cellule, où il devient du texte |
@@ -29,6 +29,10 @@ Page autonome, sans installation : ouvrir `index.html` dans un navigateur, ou la
 | Trait en travers d'un lien | Coupe le lien |
 | Croix ou rature sur une cellule | Supprime la cellule |
 | Croix sur un mot manuscrit | Efface le mot |
+| Pincer à deux doigts | Zoome, de 25 % à 400 % |
+| Glisser à deux doigts | Déplace la vue |
+| Molette, ou pavé à deux doigts (ordinateur) | Déplace la vue ; avec Ctrl ou Cmd, ou en pinçant le pavé, zoome |
+| Appui sur la pastille du zoom | Passe de 100 % à « tout voir », et inversement |
 
 ## Créer une cellule
 
@@ -69,12 +73,17 @@ Un **double appui** sur une cellule, au doigt, au stylet ou à la souris, fait n
 - Les suivantes se rangent sous la sœur la plus basse, en colonne.
 - Une mère dont la famille est repliée la déplie d'abord.
 - Au doigt ou à la souris, le champ de saisie s'ouvre sur la fille : on peut taper son texte aussitôt. Au stylet, rien ne s'ouvre, pour que le double appui reste net.
+- Le double appui fonctionne à tous les zooms : le champ ouvert par le premier appui laisse passer le second jusqu'à la cellule, au doigt comme au stylet.
 
 ## Écrire dans les cellules
 
 ### Au clavier
 
-Un appui simple sur une cellule, au doigt ou à la souris, ouvre un champ posé sur elle, dans la même typographie que le texte affiché. **Entrée** valide, **Maj + Entrée** va à la ligne, et un appui hors de la cellule, même tout près de son bord, valide aussi et referme la saisie. Au stylet, l'appui allume seulement la lignée : le texte s'écrit à la main.
+Un appui simple sur une cellule ouvre un champ posé sur elle, dans la même typographie que le texte affiché. **Entrée** valide, **Maj + Entrée** va à la ligne, et un appui hors de la cellule, même tout près de son bord, valide aussi et referme la saisie.
+
+- **Au stylet**, le champ s'ouvre une demi-seconde après l'appui, une fois écarté le double appui : on y écrit à la main grâce au Griffonnage d'iPadOS, ou au clavier.
+- **Double appui** : pendant la demi-seconde qui suit l'ouverture, le champ laisse passer un second appui jusqu'à la cellule, qui fait naître une fille.
+- **Vue de loin** : si le texte ferait moins de 11 px à l'écran, la vue revient à 100 %, la cellule en haut de l'écran, au-dessus du clavier.
 
 Le texte se cale dans la forme. S'il déborde, sa taille diminue jusqu'à 12 px, puis la cellule grandit juste assez pour le contenir ; au-delà, la dernière ligne visible se termine par des points de suspension. Une cellule écrite perd son noyau et prend une légère teinte.
 
@@ -120,7 +129,20 @@ Les liens sont routés en orthogonal autour des cellules, sans les traverser, et
 
 **Une cellule seule.** Glisser son intérieur : elle se soulève, porte une ombre, puis frissonne quand on la pose. Si un lien est presque droit, l'aimant le redresse : il s'enclenche à 8 px de l'alignement et se libère au-delà de 16 px.
 
+**Au bord de l'écran.** Une cellule glissée reste dans la partie visible : pour l'emmener plus loin, déplacer la vue à deux doigts, puis la reprendre.
+
 **Une lignée entière.** Quand une cellule tremble (voir le mode tremblement), la glisser emmène toutes ses filles visibles et leurs propres filles, en gardant leur disposition. On peut glisser dans le même geste que l'appui long ou après avoir levé le doigt. Un léger glissement pendant l'appui long ne le fait pas échouer.
+
+## Zoomer et se déplacer
+
+La toile est infinie : les cellules peuvent sortir de l'écran, et la vue se déplace et zoome de 25 % à 400 %.
+
+- **iPad et iPhone :** pincer à deux doigts pour zoomer, autour du point pris entre les doigts ; glisser à deux doigts pour déplacer la vue. Au-delà des bornes, la vue résiste puis revient en douceur ; lâchée en glissant, elle garde un peu d'élan. Un premier doigt qui venait de se poser abandonne son geste : posé sur une cellule, même sur une cellule qui tremble, elle revient à sa place ; posé sur une bille, elle se referme ; posé sur les marques, la rotation s'annule.
+- **Ordinateur :** molette ou pavé à deux doigts pour déplacer la vue ; **Ctrl ou Cmd + molette**, ou pincement du pavé, pour zoomer autour du pointeur ; **Ctrl ou Cmd + plus ou moins** par paliers ; **Ctrl ou Cmd + 0** pour revenir à 100 %.
+- **La pastille du zoom**, en bas à gauche, affiche le zoom et s'allume quand il change. Un appui passe de 100 % à « tout voir » (toutes les cellules et l'écriture, centrées, sans dépasser 100 %), et d'un autre zoom à 100 %.
+- **Ce qui reste constant à l'écran :** l'épaisseur des membranes et des liens, les outils de la cellule qui tremble, les zones de toucher et les seuils des gestes. Le texte, les formes et l'écriture grossissent avec le zoom ; la grille de points suit, et saute un point sur deux quand elle devient trop serrée.
+- **Dessiner en zoom :** la forme tracée devient une cellule de la taille dessinée, dans les mêmes limites de taille qu'à 100 %. La reconnaissance des formes et la lecture de l'écriture travaillent à l'échelle de l'écran, quel que soit le zoom.
+- **Stylet :** une paume posée en deux points, prise pour un pincement, est ignorée dès que le stylet se pose.
 
 ## Le mode tremblement
 
@@ -139,7 +161,7 @@ Un **appui long** (environ une demi-seconde) sur une cellule la fait trembler. U
 
 ### Les outils
 
-Autour de la cellule qui tremble, un cercle imaginaire porte les marques de rotation puis, à leur suite, quatre billes : **couleur**, **typographie**, **taille** et **style**. Le cercle entoure toute la forme ; il suit la cellule quand elle grandit ou tourne. Les billes se rangent dans le sens où il y a de la place, loin des liens et des bords de l'écran ; un rond, qui n'a pas de marques, les porte en haut à droite.
+Autour de la cellule qui tremble, un cercle imaginaire porte les marques de rotation puis, à leur suite, quatre billes : **couleur**, **typographie**, **taille** et **style**. Le cercle est centré sur le cadre de la forme et l'entoure à distance constante ; il suit la cellule quand elle grandit ou tourne. Sur toutes les formes, le dessin est le même : les marques au coin haut-droit, puis les billes dans le sens horaire ; un rond, qui n'a pas de marques, les porte en haut à droite. Près d'un bord de l'écran, l'ensemble glisse le long du cercle juste assez pour rester visible, et des choix qui sortiraient de l'écran se déplient de l'autre côté de leur bille ; une cellule voisine ou un lien dessous ne les déplacent pas.
 
 - **Déplier.** Un appui sur une bille déplie ses choix vers l'extérieur, en s'éloignant des marques, sur un arc de cercle. Une seule bille est dépliée à la fois : en ouvrir une replie l'autre. Un nouvel appui replie ses choix.
 - **Encoche.** Chaque bille porte une petite encoche tournée vers l'extérieur ; elle se retourne quand la bille est dépliée.
@@ -188,7 +210,7 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 ## Sur iPad et iPhone
 
 - **Stylet :** à son approche, le bord de la cellule visée s'éclaire. La paume posée sur l'écran pendant l'écriture est ignorée. Un appui long du stylet sur le fond ouvre ou ferme l'écriture à la main.
-- **Griffonnage :** cette fonction d'iPadOS, qui transforme l'écriture manuscrite en texte, avale parfois des contacts du stylet, même hors des champs de texte. La page la neutralise sur la scène, un appui dont seul le lever est arrivé compte quand même, et un geste dont le lever s'est perdu ne bloque pas les suivants. S'il reste des ratés, désactiver Réglages › Apple Pencil › Griffonnage.
+- **Griffonnage :** cette fonction d'iPadOS, qui transforme l'écriture manuscrite en texte, sert à écrire dans le champ ouvert au stylet. Elle avale parfois des contacts du stylet, même hors des champs de texte : la page la neutralise sur la scène, un appui dont seul le lever est arrivé compte quand même, et un geste dont le lever s'est perdu ne bloque pas les suivants. Sur iPad, après un appui au stylet, le clavier peut ne pas s'afficher de lui-même : le Griffonnage écrit dans le champ sans lui.
 - **Clavier :** s'il fait monter la page pour dégager le champ, elle revient en place dès la fin de la saisie.
 - **Plein écran :** ouvrir l'adresse dans Safari, puis Partager › Sur l'écran d'accueil. Le laboratoire s'ouvre alors comme une application, sans barre de navigation.
 
@@ -196,6 +218,7 @@ Une **croix** sur une cellule (deux traits droits qui se coupent, le second comm
 
 - Un seul fichier HTML, sans dépendance externe ni serveur.
 - Rendu en Canvas 2D ; les membranes sont des chaînes de points reliés par des ressorts, simulées à 240 pas par seconde. L'animation s'arrête dès que la scène est au repos.
+- Caméra : le monde garde ses unités, et l'écran vaut monde × zoom + décalage. Les seuils de toucher sont convertis à l'échelle de l'écran ; les outils et le champ de saisie sont placés en coordonnées d'écran ; les tracés passent aux reconnaissances agrandis du zoom, et chaque trait manuscrit garde le zoom auquel il a été écrit.
 - Routage orthogonal par [libavoid-js](https://github.com/Aksem/libavoid-js), portage WebAssembly de la bibliothèque libavoid du projet Adaptagrams, sous licence LGPL-2.1-or-later. Le module est embarqué dans la page.
 - Reconnaissance des formes : le tracé est comparé à chaque forme candidate ; pour les nuages et les flèches, les creux du tracé sous son enveloppe convexe départagent les formes proches ; le cœur se reconnaît au creux du milieu de son bord supérieur.
 - Couleur : le pigment se diffuse par un dégradé radial découpé à la forme de la membrane, qui grandit depuis le point d'entrée.

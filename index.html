@@ -114,6 +114,17 @@ html, body { overscroll-behavior: none; }
 .bar { touch-action: manipulation; }
 .icon-btn { width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--fill); cursor: pointer; display: grid; place-items: center; padding: 0; }
 .icon-btn[hidden] { display: none; }
+/* Zoom : une pastille de verre posée en bas à gauche (hors de la paume d'un droitier), qui dit le zoom ;
+   touchée, elle passe de 100 % à « tout voir ». Elle ne prend aucune place dans la barre, déjà pleine sur iPhone. */
+.zoom-btn {
+  position: fixed; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 5;
+  min-width: 72px; height: 44px; padding: 0 16px; border: 0; border-radius: 22px; cursor: pointer; touch-action: manipulation;
+  background: var(--glass); backdrop-filter: blur(24px) saturate(1.8); -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: 0 0 0 .5px var(--glass-edge), 0 8px 24px rgba(0,0,0,.08);
+  font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--label); transition: color 200ms ease;
+}
+.zoom-btn[data-live="true"] { color: var(--accent); }
+@media (prefers-reduced-transparency: reduce) { .zoom-btn { background: var(--ground); backdrop-filter: none; -webkit-backdrop-filter: none; } }
 #penBtn[aria-pressed="true"] { background: var(--accent); color: #fff; } /* écriture libre active */
 .icon-btn svg { width: 18px; height: 18px; }
 .icon-btn .exit { display: none; }
@@ -159,15 +170,17 @@ html, body { overscroll-behavior: none; }
     <li><b>Dessiner</b> une forme crée une cellule : rond, ovale, rectangle, triangle, losange, pentagone, hexagone, étoile, cœur, nuage ou flèche (en contour, ou la hampe puis la pointe, d’un geste ou en deux traits).</li>
     <li><b>Glisser l’intérieur</b> la déplace ; un lien presque droit l’aimante. Quand elle tremble (appui long), toute sa descendance suit.</li>
     <li><b>Tirer le bord</b> vers une autre cellule en fait sa fille.</li>
-    <li><b>Toucher une cellule</b> au doigt ou à la souris : on écrit son texte au clavier. <b>Entrée</b> valide, <b>Maj + Entrée</b> va à la ligne. Au stylet, le texte s’écrit à la main.</li>
+    <li><b>Toucher une cellule</b> : on écrit son texte au clavier, ou au stylet avec le Griffonnage d’iPadOS. <b>Entrée</b> valide, <b>Maj + Entrée</b> va à la ligne.</li>
     <li><b>Bouton stylet</b>, ou <b>stylet maintenu sur le fond</b> : on écrit à la main n’importe où (le même appui long arrête : tout ce qui a été écrit forme alors un seul bloc). <b>Appui maintenu sur un mot</b>, puis glisser : lâché sur une cellule, il y entre et devient du texte ; lâché au bord de la page, il est jeté. Une <b>croix</b> sur un mot l’efface. Une <b>pastille</b> ou un <b>tiret</b> en tête de ligne fait une liste.</li>
     <li><b>Double appui</b> : une fille de même forme bourgeonne ; les suivantes se rangent dessous. Au doigt ou à la souris, son champ de texte s’ouvre.</li>
+    <li><b>Pincer à deux doigts</b> zoome, <b>glisser à deux doigts</b> déplace la vue. À l’ordinateur : molette ou pavé pour se déplacer, <b>Ctrl ou Cmd + molette</b> (ou pincement du pavé) pour zoomer, <b>Ctrl ou Cmd + 0</b> pour 100 %. <b>La pastille du zoom</b> passe de 100 % à « tout voir ». Vue de loin, toucher une cellule pour écrire la ramène à 100 %.</li>
     <li><b>Barrer</b> un lien le coupe ; <b>une croix ou une rature</b> sur une cellule la supprime.</li>
     <li>Une cellule touchée <b>allume sa lignée</b> ; <b>toucher l’encoche</b> d’une mère replie ou déplie ses filles.</li>
     <li><b>Appui long</b> : elle tremble ; une autre touchée ensuite prend sa taille, une autre glissée s’aimante sur ses axes, et <b>les marques de son coin</b> la font tourner.</li>
     <li><b>Outils</b> : quand elle tremble, quatre <b>billes</b> se rangent à la suite de ses marques : couleur, typographie, taille et style. Touchée, une bille déplie ses choix en arc ; touchée de nouveau, elle les replie. Une <b>goutte</b> teint la cellule et sa lignée (la goutte d’eau lave le pigment) ; un <b>pétale</b> change la typographie, la taille ou le style du texte.</li>
   </ul></div></div>
 </header>
+<button class="zoom-btn" id="zoomBtn" aria-label="Zoom 100 % : toucher pour tout voir" title="100 % ou tout voir">100&nbsp;%</button>
 <p class="toast" id="toast" role="status"></p>
 <p id="status" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;font-size:15px;color:var(--label-2)"></p>
 
@@ -232,6 +245,14 @@ const TURN_IN = 5, TURN_OUT = 10;         // rotation : se cale à 5° de l'hori
 const cv = document.getElementById('scene'), ctx = cv.getContext('2d');
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let W = 0, Hh = 0, DPR = 1, colors = {};
+// Caméra : écran = monde × k + (x, y). Le monde garde les unités d'origine (à 100 %, il se confond avec l'écran) ;
+// les seuils de toucher, les traits et les outils restent constants à l'écran, quel que soit le zoom.
+const view = { k: 1, x: 0, y: 0 }, ZOOM_MIN = .25, ZOOM_MAX = 4;
+const toWX = sx => (sx - view.x) / view.k, toWY = sy => (sy - view.y) / view.k;
+const toSX = wx => wx * view.k + view.x, toSY = wy => wy * view.k + view.y;
+const scr = n => n / view.k;               // une longueur à l'écran, dans le monde
+let LW = 1;                                // épaisseur d'un trait d'un pixel à l'écran, dans le monde (fixée à chaque image)
+function viewBox() { return { l: toWX(0), r: toWX(W), t: toWY(barBottom()), b: toWY(Hh) }; } // partie visible du monde, sous la barre
 const cells = [], ropes = [], links = [];  // ropes : connecteurs en vol (tirés au doigt, ou qui reviennent après une coupe)
 let gesture = null, ink = null, hover = null;
 const opt = { spring: !reduce, bundle: true, hyst: false, diag: false, cut: 24 };
@@ -488,7 +509,7 @@ function cellBusy(c, t) {
   if ((c.selected || c.reading) && !reduce) return true;
   if (c.tr && t - c.tr.t0 < .6) return true;
   if (c.dyeFx && t < c.dyeFx.t0 + DYE_T) return true;
-  if (c.selected && c.ringR != null && Math.abs(c.ringR - toolRadius(c)) > .3) return true;
+  if (c.selected && c.ringR != null && Math.abs(c.ringR * view.k + VES_GAP - toolRadius(c)) > .3) return true;
   if (c.lit && (c.lit.off || t - c.lit.on < .25)) return true;
   if (Math.abs(1 - c.scale) > .001 || Math.abs(c.sv) > .01 || c.pull) return true;
   if (Math.abs(c.lift) > .002 || Math.abs(c.lv) > .01) return true;
@@ -505,19 +526,19 @@ function zoneOf(x, y) {
   for (let k = cells.length - 1; k >= 0; k--) { // l'encoche d'une mère, zone de 44 px
     const c = cells[k]; if (!active(c)) continue;
     const E = encoche(c, t);
-    if (E && Math.hypot(x - E.x, y - E.y) <= 22) return { c, part: 'bud' };
+    if (E && Math.hypot(x - E.x, y - E.y) <= Math.min(scr(22), Math.max(22, .5 * c.size * scaleOf(c)))) return { c, part: 'bud' }; // vue éloignée : pas plus de la moitié de la cellule
   }
   for (let k = cells.length - 1; k >= 0; k--) { // la plus haute d'abord
     const c = cells[k]; if (!active(c)) continue;
     const a = Math.atan2(y - c.y, x - c.x), d = Math.hypot(x - c.x, y - c.y);
     const P = pointAtAngle(c, a, t), rb = Math.hypot(P.x - c.x, P.y - c.y);
-    if (d <= rb - Math.min(EDGE_IN, rb * .35)) return { c, part: 'body' };
+    if (d <= rb - Math.min(scr(EDGE_IN), rb * .35)) return { c, part: 'body' };
   }
   for (let k = cells.length - 1; k >= 0; k--) {
     const c = cells[k]; if (!active(c)) continue;
     const a = Math.atan2(y - c.y, x - c.x), d = Math.hypot(x - c.x, y - c.y);
     const P = pointAtAngle(c, a, t), rb = Math.hypot(P.x - c.x, P.y - c.y);
-    if (d <= rb + EDGE_OUT) return { c, part: 'edge' };
+    if (d <= rb + scr(EDGE_OUT)) return { c, part: 'edge' };
   }
   return null;
 }
@@ -622,7 +643,7 @@ function findTarget(g) {
     if (!active(c) || !canAdopt(g.cell, c)) continue;
     const a = Math.atan2(g.y - c.y, g.x - c.x), d = Math.hypot(g.x - c.x, g.y - c.y);
     const P = pointAtAngle(c, a, t), rb = Math.hypot(P.x - c.x, P.y - c.y);
-    if (d < rb * 1.15 + 4 && d / rb < bd) { best = c; bd = d / rb; }
+    if (d < rb * 1.15 + scr(4) && d / rb < bd) { best = c; bd = d / rb; }
   }
   return best;
 }
@@ -751,9 +772,11 @@ function budOff(m, t) {
     x = low.x; y = low.y + low.ext[3] + BUD_Y + top;
   } else { // à côté de la mère, à droite s'il y a la place
     x = m.x + m.ext[1] + BUD_X + l; y = m.y;
-    if (x + r > W - 8) x = m.x - m.ext[0] - BUD_X - r;
+    if (x + r > viewBox().r - scr(8)) x = m.x - m.ext[0] - BUD_X - r;
   }
-  x = clamp(x, l + 8, W - r - 8); y = clamp(y, barBottom() + top + 12, Hh - b - 8);
+  const V = viewBox();
+  if (V.r - V.l > l + r + scr(16)) x = clamp(x, V.l + l + scr(8), V.r - r - scr(8));
+  if (V.b - V.t > top + b + scr(20)) y = clamp(y, V.t + top + scr(12), V.b - b - scr(8));
   d.rel = [x - m.x, y - m.y];
   makeLink(m, d, null, t + .15);
   if (reduce) { d.x = x; d.y = y; d.px = x; d.py = y; }
@@ -883,7 +906,7 @@ function uTurns(S, deg = 140) { // demi-tours du trait (cap qui change de plus d
   return n;
 }
 function cellSpan(c) { return (c.ext[0] + c.ext[1] + c.ext[2] + c.ext[3]) / 2 * scaleOf(c); } // taille moyenne (largeur + hauteur) / 2
-function inBox(c, x, y, pad = 8) { // point dans le cadre de la cellule (marge comprise)
+function inBox(c, x, y, pad = scr(8)) { // point dans le cadre de la cellule (marge comprise)
   const s = scaleOf(c), [l, r, t, b] = c.ext;
   return x >= c.x - l * s - pad && x <= c.x + r * s + pad && y >= c.y - t * s - pad && y <= c.y + b * s + pad;
 }
@@ -902,11 +925,11 @@ function simplify(P, eps) { // Douglas-Peucker : garde les vrais changements de 
 function strokeInfo(raw) {
   // un trait lent au stylet ou au doigt arrive en points serrés et légèrement bruités : on le simplifie
   // avant de mesurer, sinon le bruit gonfle sa longueur et il ne paraît plus droit
-  const P = simplify(raw, 6);
+  const P = simplify(raw, scr(6));
   let L = 0;
   for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-  if (P.length < 2 || L < 24) return null;
-  const S = resample(P, clamp(Math.round(L / 8), 8, 200)).pts, n = S.length;
+  if (P.length < 2 || L < scr(24)) return null;
+  const S = resample(P, clamp(Math.round(L / scr(8)), 8, 200)).pts, n = S.length;
   const chord = Math.hypot(S[n - 1][0] - S[0][0], S[n - 1][1] - S[0][1]);
   let best = null, bi = 0;
   for (const c of cells) {
@@ -1148,7 +1171,18 @@ function arrowFromTwo(shaftRaw, headRaw) { // flèche en deux traits : une hampe
   }
   return null;
 }
-function arrowCell(raw) { return arrowCellFrom(arrowFromStroke(raw)); }
+// Les reconnaissances de formes sont réglées en pixels d'écran : elles lisent le tracé tel qu'il a été dessiné
+// (le monde agrandi du zoom), et leur résultat revient dans le monde.
+const scaled = P => P.map(([x, y]) => [x * view.k, y * view.k]);
+function unscaled(o) {
+  if (!o) return o;
+  const f = 1 / view.k, P = p => [p[0] * f, p[1] * f];
+  for (const key of ['cx', 'cy', 'w', 'h', 'L', 'Wd', 'span']) if (o[key] != null) o[key] *= f;
+  for (const key of ['mid', 'tail', 'tip']) if (o[key]) o[key] = P(o[key]);
+  for (const key of ['S', 'verts']) if (o[key]) o[key] = o[key].map(P);
+  return o;
+}
+function arrowCell(raw) { return arrowCellFrom(unscaled(arrowFromStroke(scaled(raw)))); }
 function arrowCellFrom(a) { // la flèche pousse depuis son centre, dans la direction du geste
   if (!a) return null;
   const sh = arrowShape(a.L, a.span, snapDir(Math.atan2(a.tip[1] - a.tail[1], a.tip[0] - a.tail[0])));
@@ -1173,9 +1207,12 @@ function polarOf(points, cx, cy) { // rayon du contour dans une direction, d'apr
   const sa = points.map(([x, y]) => Math.atan2(y - cy, x - cx)), sd = points.map(([x, y]) => Math.hypot(x - cx, y - cy));
   return a => { let best = 0, bd = Infinity; for (let j = 0; j < sa.length; j++) { const d = Math.abs(angDist(sa[j], a)); if (d < bd) { bd = d; best = j; } } return sd[best]; };
 }
-function clampInside(c) { // jamais sous la barre ni hors de l'écran
-  const bar = document.getElementById('bar').getBoundingClientRect().bottom, [l, r, t, b] = c.ext;
-  c.x = clamp(c.x, l + 8, W - r - 8); c.y = clamp(c.y, bar + t + 12, Hh - b - 8);
+function clampInside(c) { // une cellule visible ne passe ni sous la barre ni hors de l'écran ; hors de la vue, elle reste où elle est
+  const V = viewBox(), [l, r, t, b] = c.ext;
+  if (c.x >= V.l && c.x <= V.r && c.y >= toWY(0) && c.y <= V.b) {
+    if (V.r - V.l > l + r + scr(16)) c.x = clamp(c.x, V.l + l + scr(8), V.r - r - scr(8));   // plus grande que l'écran : on ne la pousse pas
+    if (V.b - V.t > t + b + scr(20)) c.y = clamp(c.y, V.t + t + scr(12), V.b - b - scr(8));
+  }
   c.px = c.x; c.py = c.y;
 }
 function fitTri(V, w, h) { // triangle redimensionné pour tenir exactement dans w × h, centré sur son centre de gravité
@@ -1197,7 +1234,7 @@ function sizeTri(c, tw, th) { // ajuste au cadre tw × th, puis corrige d'un mê
 }
 function boxDims(P) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { w: x1 - x0, h: y1 - y0 }; }
 function cellFromStroke(raw) {
-  const k = classify(raw);
+  const k = unscaled(classify(scaled(raw)));
   if (!k) return null;
   let shape, cx = k.cx, cy = k.cy, tw = 0, th = 0;
   if (k.kind === 'circle') shape = { kind: 'circle', r: clamp((k.w + k.h) / 4, 26, 150) };
@@ -1582,8 +1619,9 @@ function stepSprings(dt) {
    horizontal et vertical attirent de même les autres cellules glissées, en priorité. */
 function snapAxes(m) {
   const c = m.c;
-  if (m.sx != null && Math.abs(m.rx - m.sx) > SNAP_OUT) { m.sx = null; m.refine = 0; m.srcX = false; }
-  if (m.sy != null && Math.abs(m.ry - m.sy) > SNAP_OUT) { m.sy = null; m.refine = 0; m.srcY = false; }
+  const SNAP_I = scr(SNAP_IN), SNAP_O = scr(SNAP_OUT);
+  if (m.sx != null && Math.abs(m.rx - m.sx) > SNAP_O) { m.sx = null; m.refine = 0; m.srcX = false; }
+  if (m.sy != null && Math.abs(m.ry - m.sy) > SNAP_O) { m.sy = null; m.refine = 0; m.srcY = false; }
   let jx = null, jy = null;
   for (const l of links) {
     if (!l.pts || (l.a !== c && l.b !== c) || (m.gset && m.gset.has(l.a === c ? l.b : l.a))) continue; // une fille emmenée bouge avec elle : rien à aligner
@@ -1592,18 +1630,18 @@ function snapAxes(m) {
     const p = l.pts, n = p.length / 2, vertical = sig[0] === 'U' || sig[0] === 'D';
     const a = vertical ? p[0] : p[1], b = vertical ? p[2 * n - 2] : p[2 * n - 1];
     const jog = l.b === c ? a - b : b - a;
-    if (Math.abs(jog) > SNAP_IN) continue;
+    if (Math.abs(jog) > SNAP_I) continue;
     if (vertical) { if (jx === null || Math.abs(jog) < Math.abs(jx)) jx = jog; }
     else if (jy === null || Math.abs(jog) < Math.abs(jy)) jy = jog;
   }
   const take = (cur, j, base, raw) => { // les tracés ont été calculés à la position connue du routeur
     if (j === null) return cur;
-    if (cur == null) return Math.abs(base + j - raw) <= SNAP_IN ? base + j : null;
+    if (cur == null) return Math.abs(base + j - raw) <= SNAP_I ? base + j : null;
     return Math.abs(j) > .5 && m.refine++ < 4 ? base + j : cur;
   };
   const src = source && source !== c && !(m.gset && m.gset.has(source)) ? source : null; // la cellule qui tremble sert de repère
-  if (src && (m.srcX || Math.abs(m.rx - src.x) <= SNAP_IN)) { m.sx = src.x; m.srcX = true; } else m.sx = take(m.sx, jx, c.rx, m.rx);
-  if (src && (m.srcY || Math.abs(m.ry - src.y) <= SNAP_IN)) { m.sy = src.y; m.srcY = true; } else m.sy = take(m.sy, jy, c.ry, m.ry);
+  if (src && (m.srcX || Math.abs(m.rx - src.x) <= SNAP_I)) { m.sx = src.x; m.srcX = true; } else m.sx = take(m.sx, jx, c.rx, m.rx);
+  if (src && (m.srcY || Math.abs(m.ry - src.y) <= SNAP_I)) { m.sy = src.y; m.srcY = true; } else m.sy = take(m.sy, jy, c.ry, m.ry);
 }
 function follow(m) { if (m.group) for (const [d, ox, oy] of m.group) { d.x = m.c.x + ox; d.y = m.c.y + oy; } } // la descendance garde sa place autour de la mère
 function magnet(dt, dragging, deferred) {
@@ -1634,21 +1672,21 @@ function toolCenter(c) { // centre du cercle des outils : le milieu du cadre de 
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (let i = 0; i < c.n; i++) { x0 = Math.min(x0, c.bx[i]); x1 = Math.max(x1, c.bx[i]); y0 = Math.min(y0, c.by[i]); y1 = Math.max(y1, c.by[i]); }
   const s = scaleOf(c);
-  return { x: c.x + (x0 + x1) / 2 * s, y: c.y + (y0 + y1) / 2 * s, ox: (x0 + x1) / 2, oy: (y0 + y1) / 2 };
+  return { x: toSX(c.x + (x0 + x1) / 2 * s), y: toSY(c.y + (y0 + y1) / 2 * s), ox: (x0 + x1) / 2, oy: (y0 + y1) / 2 }; // à l'écran
 }
-function toolRadius(c) { // cercle imaginaire des outils : il entoure la forme, à distance constante, et suit en douceur quand elle grandit
+function toolRadius(c) { // cercle imaginaire des outils, à l'écran : il entoure la forme à distance constante, et suit en douceur quand elle grandit
   const O = toolCenter(c);
   let R0 = 0; for (let i = 0; i < c.n; i++) R0 = Math.max(R0, Math.hypot(c.bx[i] - O.ox, c.by[i] - O.oy));
-  const R = R0 * scaleOf(c) + VES_GAP, t = now();
+  const R = R0 * scaleOf(c), t = now();          // la forme, dans le monde ; le zoom s'applique sans retard
   if (c.ringR == null || reduce || t - c.ringT > .5) c.ringR = R;
   else if (t > c.ringT) c.ringR += (R - c.ringR) * (1 - Math.exp(-(t - c.ringT) * 9));
   c.ringT = t;
-  return c.ringR;
+  return c.ringR * view.k + VES_GAP;
 }
 function turnBase(c) { // direction du coin haut-droit, vue du centre du cercle des outils ; elle tourne avec la forme
   if (c.kind === 'circle' || !c.ext0) return null;  // un rond tourné reste le même rond : pas de poignée
   const s = scaleOf(c), a = c.turn || 0, C = Math.cos(a), S = Math.sin(a), lx = c.ext0[1] * s, ly = -c.ext0[2] * s;
-  const O = toolCenter(c), kx = c.x + lx * C - ly * S, ky = c.y + lx * S + ly * C;
+  const O = toolCenter(c), kx = toSX(c.x + lx * C - ly * S), ky = toSY(c.y + lx * S + ly * C);
   return Math.atan2(ky - O.y, kx - O.x);
 }
 function turnHandle(c) { // marques de rotation : sur le cercle des outils, au coin, ou glissées avec les billes quand un bord manque de place
@@ -1692,7 +1730,8 @@ let dyeing = null;                        // goutte en cours d'absorption : { c,
 function toolRing(c) { // marques puis billes, partout le même dessin horaire ; l'ensemble ne glisse sur le cercle, au plus près du coin, que si un bord de l'écran le couperait
   const a0 = turnBase(c), mA0 = a0 ?? -Math.PI / 4, R = toolRadius(c), O = toolCenter(c), V = c.car;  // un rond, sans marques : en haut à droite
   const beadsAt = mA => TOOLS.map((_, k) => mA + (32 + 30 * k) / R);
-  if (!V || V.key !== c.selT || (Math.abs(angDist(mA0, V.mA0)) > .3 && !(gesture && gesture.kind === 'turn'))) {
+  const vs = `${view.k.toFixed(3)} ${view.x.toFixed(0)} ${view.y.toFixed(0)}`, still = !pinch && !viewAnim && !viewVel; // la vue a changé : nouvelle place, une fois au repos
+  if (!V || V.key !== c.selT || (Math.abs(angDist(mA0, V.mA0)) > .3 && !(gesture && gesture.kind === 'turn')) || (V.vs !== vs && still)) {
     const seen = pts => pts.filter(([a, r]) => { const x = O.x + Math.cos(a) * r, y = O.y + Math.sin(a) * r; return x > 14 && x < W - 14 && y > barBottom() + 14 && y < Hh - 14; }).length;
     const fan = (k, b, d) => k ? Array.from({ length: optLabels(TOOLS[k]).length }, (_, i) => [b + d * 26 * i / (R + 24), R + 74])   // pétales
                                : Array.from({ length: PIGMENTS }, (_, i) => [b + d * 24 * i / (R + 32), R + 32]);                // gouttes
@@ -1704,7 +1743,7 @@ function toolRing(c) { // marques puis billes, partout le même dessin horaire ;
       if (sc > bs) { bs = sc; slide = d; }
     }
     const B = beadsAt(mA0 + slide), od = B.map((b, k) => seen(fan(k, b, 1)) >= seen(fan(k, b, -1)) ? 1 : -1);  // des choix qui sortiraient de l'écran se déplient de l'autre côté de leur bille
-    c.car = { key: c.selT, mA0, slide, od };
+    c.car = { key: c.selT, mA0, slide, od, vs };
   }
   const mA = mA0 + c.car.slide;
   return { mA, R, O, od: c.car.od, B: beadsAt(mA) };
@@ -1748,7 +1787,7 @@ function ringLayout(c, t) { // billes, puis choix de la bille dépliée (ou qui 
         let x = T.O.x + Math.cos(aa) * rr, y = T.O.y + Math.sin(aa) * rr, r = VES_R * (.35 + .65 * Math.min(1, e));
         if (dyeing && dyeing.c === c && dyeing.i === i && u >= 1) { // absorbée par la membrane, puis elle repousse à sa place
           const q = t - dyeing.t0;
-          if (q < .3) { const f = q / .3, P = pointAtAngle(c, Math.atan2(y - c.y, x - c.x), t); x += (P.x - x) * f * f; y += (P.y - y) * f * f; r *= 1 - f * f; }
+          if (q < .3) { const f = q / .3, Q = pointAtAngle(c, Math.atan2(y - toSY(c.y), x - toSX(c.x)), t), P = { x: toSX(Q.x), y: toSY(Q.y) }; x += (P.x - x) * f * f; y += (P.y - y) * f * f; r *= 1 - f * f; }
           else if (q < .7) r = 0;
           else r *= Math.min(1, Math.max(0, backOut(clamp((q - .75) / .35, 0, 1))));
         }
@@ -1970,17 +2009,17 @@ function fitText(c) { // pendant la saisie : si le texte déborde à 12 px, la c
 }
 function inShape(c, x, y) { // point dans la membrane (à 4 px près)
   const P = pointAtAngle(c, Math.atan2(y - c.y, x - c.x), now());
-  return Math.hypot(x - c.x, y - c.y) <= Math.hypot(P.x - c.x, P.y - c.y) + 4;
+  return Math.hypot(x - c.x, y - c.y) <= Math.hypot(P.x - c.x, P.y - c.y) + scr(4);
 }
 function placeField() { // le champ suit sa cellule et la couvre, sans la dépasser : un appui hors d'elle termine la saisie
   const c = editing;
   if (!c) return;
-  const L = textLayout(c), s = scaleOf(c), size = Math.max(Math.round(TEXT_MIN * sizeK(c)), L.size * s), list = isList(c.text);
+  const L = textLayout(c), z = view.k, s = scaleOf(c) * z, size = Math.max(Math.round(TEXT_MIN * sizeK(c)), L.size * scaleOf(c)) * z, list = isList(c.text); // à l'écran : le zoom s'applique
   let tw = Math.max(90, L.box.w * s);
   if (list) { ctx.save(); ctx.font = cellFont(c, L.size); tw = blockW(L.lines) * s + 2; ctx.restore(); } // liste : le champ épouse son bloc, aligné à gauche
   const [el, er, et, eb] = c.ext, bw = (el + er) * s, bh = (et + eb) * s;
   const fw = Math.min(W - 16, Math.max(tw, bw)), fh = Math.max(size * LINE + 8, bh); // zone de saisie : le cadre de la cellule
-  const cx = c.x + L.box.dx, cy = c.y + L.box.dy;
+  const cx = toSX(c.x + L.box.dx), cy = toSY(c.y + L.box.dy);
   const key = [Math.round(cx), Math.round(cy), Math.round(tw), Math.round(fw), Math.round(fh), size.toFixed(1), c.fold ? 0 : 1, list ? 1 : 0, styleKey(c), c.under ? 1 : 0, c.strike ? 1 : 0].join();
   if (key === fieldKey) return;
   fieldKey = key;
@@ -1994,12 +2033,21 @@ function placeField() { // le champ suit sa cellule et la couvre, sans la dépas
   field.style.left = (cx - fw / 2) + 'px'; field.style.top = (cy - h / 2) + 'px';
   field.style.opacity = c.fold || c.hidden ? 0 : 1;   // une fille encore dans sa mère : champ prêt, invisible
 }
+let readTimer = 0, fieldPass = 0;
+function readableView(c) { // écrire dans une cellule vue de loin : la vue revient à 100 %, la cellule en haut, au-dessus du clavier
+  if (view.k >= 1 || textLayout(c).size * view.k >= 11) return;   // texte encore lisible : la vue ne bouge pas
+  const m = c.fold && c.rel && motherOf(c), x = m ? m.x + c.rel[0] : c.x, y = m ? m.y + c.rel[1] : c.y; // une fille qui sort de sa mère : sa place d'arrivée
+  const top = barBottom();
+  animateView(1, W / 2 - x, top + (Hh - top) * .35 - y);
+}
 function startEdit(c) {
   if (editing === c) return;
   endEdit();
   editing = c; c._tl = null; fieldKey = ''; editFrom = c.text || '';
   field.textContent = c.text || '';
   field.hidden = false;
+  field.style.pointerEvents = 'none'; clearTimeout(fieldPass); fieldPass = setTimeout(() => { field.style.pointerEvents = ''; }, DBL_TAP * 1000); // le second appui d'un double appui traverse le champ jusqu'à la cellule, comme au stylet
+  clearTimeout(readTimer); readTimer = setTimeout(() => { if (editing === c) readableView(c); }, DBL_TAP * 1000 + 30); // après la fenêtre du double appui : la cellule ne doit pas fuir le second appui
   placeField();
   // au doigt ou au stylet, iPadOS n'ouvre le clavier que pendant la fin du contact : on attend « touchend »
   if (inputType === 'mouse') focusField();
@@ -2042,8 +2090,9 @@ field.addEventListener('blur', () => endEdit());     // clavier refermé, ou app
 field.addEventListener('pointerdown', e => { // second appui d'un double appui posé sur le champ : une fille naît
   inputType = e.pointerType;
   const lt = lastTap, c = editing;
-  if (c && !inShape(c, e.clientX, e.clientY)) { e.preventDefault(); endEdit(); if (focused) focus(null); return; } // coin du cadre, hors de la forme : comme le fond, il termine la saisie
-  if (!c || !lt || lt.c !== c || e.timeStamp / 1000 - lt.t >= DBL_TAP || Math.hypot(e.clientX - lt.x, e.clientY - lt.y) >= 32) return;
+  const x = toWX(e.clientX), y = toWY(e.clientY);
+  if (c && !inShape(c, x, y)) { e.preventDefault(); endEdit(); if (focused) focus(null); return; } // coin du cadre, hors de la forme : comme le fond, il termine la saisie
+  if (!c || !lt || lt.c !== c || e.timeStamp / 1000 - lt.t >= DBL_TAP || Math.hypot(x - lt.x, y - lt.y) >= scr(32)) return;
   e.preventDefault();
   lastTap = null; focus(lt.was); budOff(c, now());
 });
@@ -2142,8 +2191,9 @@ function boxOfPts(P) { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -I
 function inkAt(x, y) { // le mot dont un trait passe sous le doigt (12 px de tolérance)
   for (let i = inks.length - 1; i >= 0; i--) {
     const k = inks[i], b = k.box, px = x - k.dx, py = y - k.dy;
-    if (k.fly || k.gone || px < b.x0 - 12 || px > b.x1 + 12 || py < b.y0 - 12 || py > b.y1 + 12) continue;
-    for (const st of k.strokes) for (const [sx, sy] of st) if ((sx - px) ** 2 + (sy - py) ** 2 < 144) return k;
+    const tol = scr(12);
+    if (k.fly || k.gone || px < b.x0 - tol || px > b.x1 + tol || py < b.y0 - tol || py > b.y1 + tol) continue;
+    for (const st of k.strokes) for (const [sx, sy] of st) if ((sx - px) ** 2 + (sy - py) ** 2 < tol * tol) return k;
   }
   return null;
 }
@@ -2163,15 +2213,16 @@ function addStroke(pts, t) { // un trait rejoint le mot qu'il prolonge (proche, 
   for (let i = inks.length - 1; i >= 0 && !g; i--) {
     const k = inks[i], B = k.box;
     if (k.fly || k.gone) continue;
-    const near = b.x0 < B.x1 + 70 && b.x1 > B.x0 - 70 && b.y0 < B.y1 + 40 && b.y1 > B.y0 - 40;
-    const touch = b.x0 < B.x1 + 12 && b.x1 > B.x0 - 12 && b.y0 < B.y1 + 12 && b.y1 > B.y0 - 12;
+    const near = b.x0 < B.x1 + scr(70) && b.x1 > B.x0 - scr(70) && b.y0 < B.y1 + scr(40) && b.y1 > B.y0 - scr(40);
+    const touch = b.x0 < B.x1 + scr(12) && b.x1 > B.x0 - scr(12) && b.y0 < B.y1 + scr(12) && b.y1 > B.y0 - scr(12);
     if ((near && t - k.t < 2.5) || touch) { g = k; break; }
     // pastille ou tiret posé sous le mot, aligné sur son bord gauche : la ligne suivante d'une liste
-    const hs = k.strokes.map(st => { const q = boxOfPts(st); return q.y1 - q.y0; }).filter(h => h >= 8).sort((p, q) => p - q), H = hs.length ? hs[hs.length >> 1] : 30;
-    if (b.y1 - b.y0 < 8 && b.x1 - b.x0 < 30 && Math.abs(b.x0 - B.x0) < 40 && b.y0 > B.y1 - 4 && b.y0 - B.y1 < 2.5 * H && t - k.t < 2.5) g = k;
+    const hs = k.strokes.map(st => { const q = boxOfPts(st); return q.y1 - q.y0; }).filter(h => h >= scr(8)).sort((p, q) => p - q), H = hs.length ? hs[hs.length >> 1] : scr(30);
+    if (b.y1 - b.y0 < scr(8) && b.x1 - b.x0 < scr(30) && Math.abs(b.x0 - B.x0) < scr(40) && b.y0 > B.y1 - scr(4) && b.y0 - B.y1 < 2.5 * H && t - k.t < 2.5) g = k;
   }
   if (!g) { g = { strokes: [], dx: 0, dy: 0, lift: 0, fly: null }; inks.push(g); }
   pts.at = t;                                      // instant du trait : l'ordre du tracé sert à découper les lignes
+  pts.zk = view.k;                                 // zoom du moment : le mot se lit et s'épaissit à l'échelle où il a été écrit
   g.strokes.push(pts); g.t = t; g.sess = writeSess; g.box = boxOfPts(g.strokes.flat());
 }
 function liftInk(g) { if (gesture !== g || !g.grp || g.lifted) return; g.lifted = true; g.grp.lift = 1; if (navigator.vibrate) navigator.vibrate(8); wake(); }
@@ -2180,7 +2231,8 @@ function dropInk(k, x, y) {
   k.lift = 0; inkTarget = null;
   const c = inkDrop(x, y);
   if (c) return absorb(k, c);
-  if (x < 20 || x > W - 20 || y > Hh - 20 || y < barBottom()) { inks.splice(inks.indexOf(k), 1); return; } // jeté hors de la page
+  const ex = toSX(x), ey = toSY(y);
+  if (ex < 20 || ex > W - 20 || ey > Hh - 20 || ey < barBottom()) { inks.splice(inks.indexOf(k), 1); return; } // jeté hors de la page
   for (const st of k.strokes) for (const p of st) { p[0] += k.dx; p[1] += k.dy; }  // posé ailleurs : il reste là
   k.dx = k.dy = 0; k.box = boxOfPts(k.strokes.flat());
 }
@@ -2196,7 +2248,7 @@ function wordBar(k) { // le mot que ce trait droit barre : il le traverse sur au
     let inLen = 0;
     for (let i = 1; i < k.S.length; i++) {
       const mx = (k.S[i][0] + k.S[i - 1][0]) / 2, my = (k.S[i][1] + k.S[i - 1][1]) / 2;
-      if (mx > b.x0 - 8 && mx < b.x1 + 8 && my > b.y0 - 8 && my < b.y1 + 8) inLen += Math.hypot(k.S[i][0] - k.S[i - 1][0], k.S[i][1] - k.S[i - 1][1]);
+      if (mx > b.x0 - scr(8) && mx < b.x1 + scr(8) && my > b.y0 - scr(8) && my < b.y1 + scr(8)) inLen += Math.hypot(k.S[i][0] - k.S[i - 1][0], k.S[i][1] - k.S[i - 1][1]);
     }
     if (inLen >= .5 * D && inLen > bi) { bi = inLen; best = w; }
   }
@@ -2208,7 +2260,7 @@ function crossesWord(a, b, w) { // le second trait coupe le premier sur le mot, 
   if (!k) return false;
   const x = A0[0] + (A1[0] - A0[0]) * k.t, y = A0[1] + (A1[1] - A0[1]) * k.t, bx = w.box;
   const ang = Math.abs(angDist(Math.atan2(A1[1] - A0[1], A1[0] - A0[0]), Math.atan2(B1[1] - B0[1], B1[0] - B0[0]))) % Math.PI;
-  return x > bx.x0 - 8 && x < bx.x1 + 8 && y > bx.y0 - 8 && y < bx.y1 + 8 && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
+  return x > bx.x0 - scr(8) && x < bx.x1 + scr(8) && y > bx.y0 - scr(8) && y < bx.y1 + scr(8) && ang > 35 * Math.PI / 180 && ang < 145 * Math.PI / 180;
 }
 function eraseWord(w, t, stroke) { // le mot se contracte et s'efface ; le premier trait de la croix part avec lui
   w.gone = t;
@@ -2218,6 +2270,11 @@ function eraseWord(w, t, stroke) { // le mot se contracte et s'efface ; le premi
   wake();
 }
 let inkX = null;                 // en écriture : premier trait d'une croix sur un mot, en attente du second
+const inkZoom = k => (k.strokes[0] && k.strokes[0].zk) || 1;  // zoom auquel le mot a été écrit
+function inkScreen(k) { // le mot à l'échelle de l'écran où il a été écrit : sa lecture est réglée en pixels d'écran
+  const f = inkZoom(k), strokes = k.strokes.map(st => st.map(p => [p[0] * f, p[1] * f, p[2]]));
+  return { strokes, box: boxOfPts(strokes.flat()) };
+}
 function inkImage(k) { // le mot en noir sur blanc, tracé comme à l'écran, agrandi s'il est petit, pour la lecture
   const b = k.box, pad = 18, s = clamp(260 / Math.max(40, b.y1 - b.y0), 1, 4);
   const c2 = document.createElement('canvas'), x2 = c2.getContext('2d');
@@ -2313,7 +2370,7 @@ async function googleLine(strokes) { // une ligne d'écriture, lue par Google
   return String(((json[1] && json[1][0] && json[1][0][1]) || [])[0] || '');
 }
 async function readGoogle(k) {
-  const L = inkLines(k), texts = await Promise.all(L.map(l => googleLine(l.strokes)));
+  const L = inkLines(inkScreen(k)), texts = await Promise.all(L.map(l => googleLine(l.strokes)));
   const out = joinLines(texts.map((t, i) => t.trim() ? (L[i].mark ? L[i].mark + ' ' : '') + t : ''));
   if (!out) throw { code: 'illisible' };
   return out;
@@ -2432,7 +2489,7 @@ function drawMotes(t) {
   ctx.save();
   for (const b of batches) {
     const tint = tintOf(b.c, t), u = clamp((t - b.t0) / .8, 0, 1); // l'encre prend peu à peu la teinte de la cellule
-    const col = [0, 1, 2].map(i => lab[i] + (tint[i] - lab[i]) * u | 0), r = 1.2 + .7 * u;
+    const col = [0, 1, 2].map(i => lab[i] + (tint[i] - lab[i]) * u | 0), r = (1.2 + .7 * u) * LW;
     for (const m of b.motes) {
       ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${m.a * lab[3]})`;
       ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, TAU); ctx.fill();
@@ -2461,7 +2518,7 @@ function absorb(k, c) { // le mot entre dans la cellule, qui le « digère » pe
     c.reading--; wake();
   };
   sampler.then(sample => sample
-    ? inkImage(k).then(img => readInk(sample, img, context).then(text => place(text, img))) // dans Claude : Claude lit l'image du mot
+    ? inkImage(inkScreen(k)).then(img => readInk(sample, img, context).then(text => place(text, img))) // dans Claude : Claude lit l'image du mot
     : readGoogle(k).then(text => place(text, null))                                      // ailleurs : Google lit les traits
   ).catch(e => { // rien n'est perdu : les gouttelettes s'évanouissent et le mot réapparaît à sa place
     b.fail = true;
@@ -2472,7 +2529,7 @@ function absorb(k, c) { // le mot entre dans la cellule, qui le « digère » pe
   wake();
 }
 function inkPath(st) {
-  if (st.length < 2) { ctx.beginPath(); ctx.arc(st[0][0], st[0][1], 1.4, 0, TAU); ctx.fill(); return; }
+  if (st.length < 2) { ctx.beginPath(); ctx.arc(st[0][0], st[0][1], ctx.lineWidth * .58, 0, TAU); ctx.fill(); return; }
   ctx.beginPath(); ctx.moveTo(st[0][0], st[0][1]);
   for (let i = 1; i < st.length - 1; i++) ctx.quadraticCurveTo(st[i][0], st[i][1], (st[i][0] + st[i + 1][0]) / 2, (st[i][1] + st[i + 1][1]) / 2);
   ctx.lineTo(st[st.length - 1][0], st[st.length - 1][1]); ctx.stroke();
@@ -2490,11 +2547,11 @@ function drawInks(t) {
     ctx.globalAlpha = al;
     if (k.lift) { ctx.shadowColor = colors.shadow; ctx.shadowBlur = 14 * DPR; ctx.shadowOffsetY = 4 * DPR; }
     ctx.translate(cx0 + ox, cy0 + oy); ctx.scale(sc, sc); ctx.translate(-cx0, -cy0);
-    for (const st of k.strokes) inkPath(st);
+    for (const st of k.strokes) { ctx.lineWidth = 2.4 / (st.zk || 1); inkPath(st); } // l'épaisseur du stylet au zoom où le trait a été tracé
     ctx.restore();
   }
   const g = gesture; // le trait en cours d'écriture
-  if (g && g.kind === 'ink' && !g.lifted && writeMode) { ctx.globalAlpha = .9; inkPath(g.pts); }
+  if (g && g.kind === 'ink' && !g.lifted && writeMode) { ctx.globalAlpha = .9; ctx.lineWidth = 2.4 * LW; inkPath(g.pts); }
   ctx.restore();
 }
 
@@ -2518,16 +2575,16 @@ function drawEncoche(c, t, tc) {
   if (E.e < .99) { // échancrure : la descendance est dépliée
     ctx.save(); ctx.globalAlpha = 1 - clamp(E.e, 0, 1);
     ctx.beginPath(); ctx.arc(E.x, E.y, 4, 0, TAU); ctx.fillStyle = colors.ground; ctx.fill();
-    ctx.strokeStyle = line; ctx.lineWidth = 1.25; ctx.stroke(); ctx.restore();
+    ctx.strokeStyle = line; ctx.lineWidth = 1.25 * LW; ctx.stroke(); ctx.restore();
   }
   if (E.e > .01) { // bourgeon : la descendance est repliée dedans
     const R = 11 * E.e;
     ctx.save();
     ctx.beginPath(); ctx.arc(E.x, E.y, R, 0, TAU); ctx.fillStyle = colors.cell; ctx.fill(); // recouvre la membrane : une seule enveloppe
-    ctx.beginPath(); ctx.rect(0, 0, W, Hh); membranePath(c, t, true); ctx.clip('evenodd'); // contour seulement hors de la cellule
+    ctx.beginPath(); ctx.rect(toWX(0), toWY(0), W / view.k, Hh / view.k); membranePath(c, t, true); ctx.clip('evenodd'); // contour seulement hors de la cellule
     ctx.beginPath(); ctx.arc(E.x, E.y, R, 0, TAU);
     if (lit) { ctx.shadowColor = colors.glow; ctx.shadowBlur = 10 * DPR; }
-    ctx.strokeStyle = line; ctx.lineWidth = lit ? 2 : 1.25; ctx.stroke();
+    ctx.strokeStyle = line; ctx.lineWidth = (lit ? 2 : 1.25) * LW; ctx.stroke();
     ctx.restore();
     const n = descendants(c).filter(([d]) => d.hidden).length, col = `rgba(${tc[0] | 0},${tc[1] | 0},${tc[2] | 0},.9)`;
     ctx.save(); ctx.globalAlpha = clamp((E.e - .5) * 2, 0, 1); ctx.fillStyle = col;
@@ -2608,7 +2665,7 @@ function step(dt, t) {
     for (let i = ropes.length - 1; i >= 0; i--) if (ropes[i].dead) ropes.splice(i, 1);
   }
   const springs = stepSprings(dt);
-  const motesOn = stepMotes(dt, t);
+  const motesOn = stepMotes(dt, t), viewOn = stepView(dt, t);
   if (router && !deferred && (sync() || needsRoute)) route(); // le routage suit la scène, sauf s'il est trop lent pendant un glissement
   for (const c of cells.slice()) if (c.dying) { // la cellule se contracte, puis disparaît
     const p = (t - c.dying) / .45;
@@ -2617,7 +2674,7 @@ function step(dt, t) {
   }
   for (let i = ghosts.length - 1; i >= 0; i--) if (t - ghosts[i].fade >= .35) ghosts.splice(i, 1);
   const inkBusy = !!ink || ghosts.length > 0 || !!pending || motesOn || inks.some(k => k.fly || k.lift || k.gone || (k.appear && t - k.appear < .4) || (k.merged && t - k.merged < .45));
-  return !!gesture || inkBusy || magOn || turnOn || springs || ropes.length > 0 || needsRoute ||
+  return !!gesture || !!pinch || viewOn || inkBusy || magOn || turnOn || springs || ropes.length > 0 || needsRoute ||
          cells.some(c => cellBusy(c, t) || c.ax || c.ay) || links.some(l => linkBusy(l, t));
 }
 
@@ -2694,26 +2751,38 @@ function drawLink(l, t) {
   let L = 0; for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
   const base = Math.max(1.4, 2.4 - L / 500);
   ctx.globalAlpha = l.cut ? .3 : 1; ctx.strokeStyle = colors.wire;
-  taperPoly(P, base + .9, Math.max(1, base - .6)); // plus épais côté mère : on lit le sens de la filiation
+  taperPoly(P, (base + .9) * LW, Math.max(1, base - .6) * LW); // plus épais côté mère : on lit le sens de la filiation
   const fs = t - l.flow;
   if (l.lit || (l.flow && fs >= 0 && fs < .6)) { // lignée allumée, impulsion qui descend vers la fille ou remonte au repli
     ctx.save(); ctx.strokeStyle = colors.glow; ctx.shadowColor = colors.glow; ctx.shadowBlur = 8 * DPR;
-    if (l.lit) { ctx.globalAlpha = .35; ctx.lineWidth = 1.6; strokePoly(P); }
-    if (l.flow && fs >= 0 && fs < .6) pulse(P, fs, l.flowDir, 3.2, 14);
+    if (l.lit) { ctx.globalAlpha = .35; ctx.lineWidth = 1.6 * LW; strokePoly(P); }
+    if (l.flow && fs >= 0 && fs < .6) pulse(P, fs, l.flowDir, 3.2 * LW, 14);
     ctx.restore();
   }
   if (l.symb) { // symbiose : le lien s'allume, une impulsion court de la mère à la fille
     const s = t - l.symb, gl = envelope(s, .12, .5);
     if (gl > .01) {
       ctx.save(); ctx.strokeStyle = colors.glow; ctx.shadowColor = colors.glow; ctx.shadowBlur = 10 * DPR;
-      ctx.globalAlpha = .55 * gl; ctx.lineWidth = 2.2; strokePoly(P);
-      if (s < .6) pulse(P, s, 1, 3.4, 16);
+      ctx.globalAlpha = .55 * gl; ctx.lineWidth = 2.2 * LW; strokePoly(P);
+      if (s < .6) pulse(P, s, 1, 3.4 * LW, 16);
       ctx.restore();
     }
   }
 }
+let gridKey = '';
+function syncGrid() { // la grille de points suit le zoom ; trop serrée, elle saute un point sur deux
+  let g = 24 * view.k; while (g < 16) g *= 2;
+  const key = g.toFixed(2) + view.x.toFixed(1) + view.y.toFixed(1);
+  if (key === gridKey) return;
+  gridKey = key;
+  document.body.style.backgroundSize = `${g}px ${g}px`;
+  document.body.style.backgroundPosition = `${view.x + 12 * view.k - g / 2}px ${view.y + 12 * view.k - g / 2}px`; // points aux mêmes endroits du monde : les grilles espacées en gardent un sur deux
+}
 function draw(t) {
+  LW = 1 / view.k; syncGrid(); syncZoom();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, Hh);
+  ctx.setTransform(DPR * view.k, 0, 0, DPR * view.k, DPR * view.x, DPR * view.y); // le monde, vu par la caméra
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const c of cells) { // membranes du moment : elles servent aussi à prolonger les tracés jusqu'à elles
     if (c.hidden || c.scale < .01) { c._pts = null; continue; }
@@ -2723,7 +2792,7 @@ function draw(t) {
   }
   for (const l of links) drawLink(l, t); // les liens d'abord : leurs extrémités passent sous le cytoplasme
   ctx.globalAlpha = 1; ctx.strokeStyle = colors.wire;
-  for (const r of ropes) strokeTaper(ropePoints(r), 3.1, 1.6);
+  for (const r of ropes) strokeTaper(ropePoints(r), 3.1 * LW, 1.6 * LW);
   ctx.globalAlpha = 1;
   for (const c of cells) {
     if (c.scale < .01 || c.hidden) continue;
@@ -2733,14 +2802,14 @@ function draw(t) {
       if (gl > .01) {
         ctx.save(); membranePath(c, t);
         ctx.strokeStyle = colors.glow; ctx.shadowColor = colors.glow; ctx.shadowBlur = 22 * DPR * gl;
-        ctx.globalAlpha = .7 * gl; ctx.lineWidth = 2.5; ctx.stroke(); ctx.restore();
+        ctx.globalAlpha = .7 * gl; ctx.lineWidth = 2.5 * LW; ctx.stroke(); ctx.restore();
       }
     }
     const lv = litLevel(c, t);
     if (lv > .01) { // fille allumée par la sélection de sa mère
       ctx.save(); membranePath(c, t);
       ctx.strokeStyle = colors.glow; ctx.shadowColor = colors.glow; ctx.shadowBlur = 16 * DPR * lv;
-      ctx.globalAlpha = .6 * lv; ctx.lineWidth = 2.2; ctx.stroke(); ctx.restore();
+      ctx.globalAlpha = .6 * lv; ctx.lineWidth = 2.2 * LW; ctx.stroke(); ctx.restore();
     }
     membranePath(c, t);
     ctx.save();
@@ -2764,7 +2833,7 @@ function draw(t) {
     } else { ctx.fillStyle = cytoK(c, wr) ? rgbStr(cytoRGB(c, t)) : colors.cell; ctx.fill(); }
     ctx.restore();
     const edge = (hover && hover.c === c && hover.part !== 'body') || (reduce && c.selected) || c === focused || c === inkTarget; // bord ou encoche survolés, cellule qui va recevoir un mot
-    ctx.strokeStyle = edge ? colors.glow : colors.membrane; ctx.lineWidth = edge ? 2 : 1.25; ctx.stroke();
+    ctx.strokeStyle = edge ? colors.glow : colors.membrane; ctx.lineWidth = (edge ? 2 : 1.25) * LW; ctx.stroke();
     // noyau : il se décale du côté où la membrane se déforme
     let mx = 0, my = 0;
     for (let i = 0; i < c.n; i++) { mx += c.off[i] * c.nx[i]; my += c.off[i] * c.ny[i]; }
@@ -2774,7 +2843,7 @@ function draw(t) {
     drawText(c, t, mx / c.n, my / c.n);
     drawEncoche(c, t, tc);
   }
-  if (source && !source.hidden && !source.dying) { drawTurn(source, t); drawTools(source, t); }
+  if (source && !source.hidden && !source.dying) { ctx.save(); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); drawTurn(source, t); drawTools(source, t); ctx.restore(); } // outils : à l'écran, taille constante
   drawMotes(t);
   drawInks(t);
   placeField();
@@ -2782,7 +2851,7 @@ function draw(t) {
     if (!k || k.pts.length < 2) continue;
     ctx.save();
     ctx.globalAlpha = k.fade ? Math.max(0, 1 - (t - k.fade) / .35) : .85;
-    ctx.strokeStyle = colors.wire; ctx.lineWidth = 2;
+    ctx.strokeStyle = colors.wire; ctx.lineWidth = 2 * LW;
     strokeCurve(k.pts);
     ctx.restore();
   }
@@ -2825,6 +2894,133 @@ function longPress(g) {
   if (navigator.vibrate) navigator.vibrate(8);
 }
 const barBottom = () => document.getElementById('bar').getBoundingClientRect().bottom;
+
+/* ---------- Zoom ----------
+   Deux doigts : pincer pour zoomer, glisser pour se déplacer ; un premier doigt qui venait de se poser
+   abandonne son geste. Au-delà des bornes, la vue résiste puis revient en douceur ; lâchée en glissant,
+   elle garde un peu d'élan. Ordinateur : molette ou deux doigts sur le pavé pour se déplacer,
+   Ctrl ou Cmd + molette, ou pincement du pavé, pour zoomer ; Ctrl ou Cmd + 0 revient à 100 %. */
+const touchPts = new Map(), palms = new Set(); // doigts posés : identifiant → position à l'écran ; paumes : contacts présents quand le stylet s'est posé
+let pinch = null, viewAnim = null, viewVel = null;
+const midOf = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+function rubber(k) { // au-delà des bornes, le zoom résiste de plus en plus
+  return k > ZOOM_MAX ? ZOOM_MAX * (k / ZOOM_MAX) ** .3 : k < ZOOM_MIN ? ZOOM_MIN * (k / ZOOM_MIN) ** .3 : k;
+}
+function zoomAt(sx, sy, k) { // zoom autour d'un point de l'écran, qui reste sous le doigt ou le pointeur
+  const wx = toWX(sx), wy = toWY(sy);
+  view.k = k; view.x = sx - wx * k; view.y = sy - wy * k;
+  wake();
+}
+function animateView(k, x, y, dur = .45) { // vers une vue cible : le zoom varie géométriquement, le centre glisse
+  const cx = W / 2, cy = (barBottom() + Hh) / 2, wx = (cx - x) / k, wy = (cy - y) / k;
+  viewAnim = { k0: view.k, k1: k, wx, wy, s0: [toSX(wx), toSY(wy)], s1: [cx, cy], t0: now(), dur: reduce ? .01 : dur };
+  viewVel = null; wake();
+}
+function viewAround(k, sx = W / 2, sy = (barBottom() + Hh) / 2) { // la vue au zoom k, le point visé restant en place
+  const wx = toWX(sx), wy = toWY(sy);
+  return [k, sx - wx * k, sy - wy * k];
+}
+function fitView() { // tout voir : les cellules et l'écriture, centrées sous la barre, sans dépasser 100 %
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of cells) if (!c.hidden && !c.dying) { const [l, r, t, b] = c.ext; x0 = Math.min(x0, c.x - l); x1 = Math.max(x1, c.x + r); y0 = Math.min(y0, c.y - t); y1 = Math.max(y1, c.y + b); }
+  for (const k of inks) if (!k.fly && !k.gone) { x0 = Math.min(x0, k.box.x0 + k.dx); x1 = Math.max(x1, k.box.x1 + k.dx); y0 = Math.min(y0, k.box.y0 + k.dy); y1 = Math.max(y1, k.box.y1 + k.dy); }
+  if (x0 === Infinity) return [1, 0, 0];
+  const top = barBottom(), pad = 32, aw = W - 2 * pad, ah = Hh - top - 2 * pad - 44; // en bas, la place de la pastille
+  const k = clamp(Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0)), ZOOM_MIN, 1);
+  return [k, W / 2 - (x0 + x1) / 2 * k, top + pad + ah / 2 - (y0 + y1) / 2 * k];
+}
+const zoomBtn = document.getElementById('zoomBtn');
+let zoomShown = 100, zoomLive = 0;
+zoomBtn.addEventListener('click', () => animateView(...(Math.abs(view.k - 1) < .005 ? fitView() : viewAround(1))));
+function syncZoom() { // la pastille suit le zoom, et s'allume tant qu'il change
+  const n = Math.round(view.k * 100);
+  if (n === zoomShown) return;
+  zoomShown = n; zoomBtn.textContent = n + '\u00a0%';
+  zoomBtn.setAttribute('aria-label', `Zoom ${n} % : toucher pour ${n === 100 ? 'tout voir' : 'revenir à 100 %'}`);
+  zoomBtn.dataset.live = 'true'; clearTimeout(zoomLive); zoomLive = setTimeout(() => { zoomBtn.dataset.live = 'false'; }, 700);
+}
+function stepView(dt, t) {
+  if (viewAnim) {
+    const A = viewAnim, p = clamp((t - A.t0) / A.dur, 0, 1), e = 1 - (1 - p) ** 3, k = A.k0 * (A.k1 / A.k0) ** e;
+    view.k = k; view.x = A.s0[0] + (A.s1[0] - A.s0[0]) * e - A.wx * k; view.y = A.s0[1] + (A.s1[1] - A.s0[1]) * e - A.wy * k;
+    if (p >= 1) viewAnim = null;
+  } else if (viewVel) { // élan d'un glissement à deux doigts
+    view.x += viewVel.vx * dt; view.y += viewVel.vy * dt;
+    const f = Math.exp(-dt / .32); viewVel.vx *= f; viewVel.vy *= f;
+    if (Math.hypot(viewVel.vx, viewVel.vy) < 12) viewVel = null;
+  }
+  return !!(viewAnim || viewVel);
+}
+function quietStart(g) { // geste au doigt qui vient de commencer, ou qui n'a presque pas bougé : il cède la place au pincement
+  if (!g || g.pointerType !== 'touch') return false;
+  const young = now() - (g.t0 ?? g.ts0 / 1000) < .25;
+  if (g.kind === 'draw') return young || (ink && ink.pts.every(p => Math.hypot(p[0] - ink.pts[0][0], p[1] - ink.pts[0][1]) < scr(30)));
+  if (g.kind === 'move') return !g.moved || young;   // déjà parti depuis un instant : la cellule reviendra
+  if (g.kind === 'link') return !g.rope || young;     // le lien à peine tiré se rétractera
+  if (g.kind === 'turn') return young;                 // la rotation à peine commencée se défera
+  if (g.kind === 'dye') return young && !!g.bead;      // une bille touchée à l'instant se referme ; un choix appliqué reste
+  if (g.kind === 'ink') return !g.lifted && (young || g.pts.every(p => Math.hypot(p[0] - g.sx, p[1] - g.sy) < scr(30)));
+  return false;
+}
+function undoStart(g) { // le premier doigt avait déjà commencé à déplacer ou à relier : la cellule revient en douceur, le lien se rétracte
+  if (g.kind === 'move' && g.moved && mag && mag.c === g.cell) { const c = g.cell; mag.sx = mag.sy = null; mag.ex = c.x - g.x0; mag.ey = c.y - g.y0; mag.rx = g.x0; mag.ry = g.y0; }
+  if (g.kind === 'link' && g.rope) { g.rope.retract = true; g.rope.tv = { x: 0, y: 0 }; }
+  if (g.kind === 'turn' && turner && turner.c === g.cell) { const m = turner; m.e += m.target - g.turn0; m.target = g.turn0; m.snap = null; }
+  if (g.kind === 'dye' && g.bead && source) { const S = toolState(source), t = now(); source.tools = { key: source.selT, open: g.wasOpen, t0: t, last: (S && S.open) || null, lt0: t }; }
+}
+function startPinch(e) { // second doigt posé : le pincement commence si le premier geste peut s'effacer
+  if (pinch || touchPts.size !== 2) return false;
+  const other = [...touchPts.keys()].find(id => id !== e.pointerId);
+  if (gesture && !(gesture.id === other && quietStart(gesture))) return false;
+  if (gesture) { undoStart(gesture); dropGesture(gesture); }
+  const ids = [other, e.pointerId], [a, b] = ids.map(id => touchPts.get(id)), m = midOf(a, b);
+  pinch = { ids, k0: view.k, x0: view.x, y0: view.y, d0: Math.max(10, Math.hypot(b[0] - a[0], b[1] - a[1])), m0: m, last: m, t: e.timeStamp, vx: 0, vy: 0, on: false };
+  viewAnim = null; viewVel = null; hover = null;
+  cv.setPointerCapture(e.pointerId);
+  wake();
+  return true;
+}
+function movePinch(ts) {
+  const P = pinch, [a, b] = P.ids.map(id => touchPts.get(id)), m = midOf(a, b), d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!P.on) { // seuil de départ : une paume posée, ou deux doigts qui tremblent, ne déplacent pas la vue
+    if (Math.abs(d - P.d0) < 10 && Math.hypot(m[0] - P.m0[0], m[1] - P.m0[1]) < 10) return;
+    P.on = true; P.last = m; P.t = ts;  // la vue rattrape d'un coup ces quelques pixels : pas de nouvelle référence, que fausserait un doigt arrivé avant l'autre
+  }
+  const k = rubber(P.k0 * d / P.d0), wx = (P.m0[0] - P.x0) / P.k0, wy = (P.m0[1] - P.y0) / P.k0; // le point du monde pris entre les doigts y reste
+  view.k = k; view.x = m[0] - wx * k; view.y = m[1] - wy * k;
+  const dt = (ts - P.t) / 1000;
+  if (dt > 0) { P.vx = .7 * P.vx + .3 * (m[0] - P.last[0]) / dt; P.vy = .7 * P.vy + .3 * (m[1] - P.last[1]) / dt; }
+  P.last = m; P.t = ts;
+  wake();
+}
+function endPinch(ts) {
+  const P = pinch; pinch = null;
+  const kc = clamp(view.k, ZOOM_MIN, ZOOM_MAX);
+  if (kc !== view.k) animateView(...viewAround(kc, P.last[0], P.last[1]), .35);          // au-delà des bornes : retour en douceur
+  else if (!reduce && ts - P.t < 80 && Math.hypot(P.vx, P.vy) > 60) viewVel = { vx: P.vx, vy: P.vy }; // lâchée en glissant : un peu d'élan
+  wake();
+}
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  viewAnim = null; viewVel = null;
+  const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? Hh : 1;
+  if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, clamp(view.k * 2 ** (-e.deltaY * u / 300), ZOOM_MIN, ZOOM_MAX)); // pincement du pavé, ou Ctrl + molette
+  else { const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0), dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY; view.x -= dx * u; view.y -= dy * u; wake(); }
+}, { passive: false });
+let gest = null; // Safari sur Mac : le pincement du pavé arrive en « gesture » ; sur un écran tactile, les doigts sont déjà suivis (et les paumes écartées)
+const tactile = navigator.maxTouchPoints > 0;
+for (const [type, fn] of [['gesturestart', e => { gest = tactile || touchPts.size ? null : { k0: view.k }; if (gest) { viewAnim = null; viewVel = null; } }],
+                          ['gesturechange', e => { if (gest) zoomAt(e.clientX, e.clientY, clamp(gest.k0 * e.scale, ZOOM_MIN, ZOOM_MAX)); }],
+                          ['gestureend', e => { gest = null; }]])
+  document.addEventListener(type, e => { e.preventDefault(); fn(e); }, { passive: false }); // la page elle-même ne zoome jamais
+addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  if (e.key === '+' || e.key === '=') animateView(...viewAround(clamp(view.k * 1.25, ZOOM_MIN, ZOOM_MAX)), .25);
+  else if (e.key === '-' || e.key === '_') animateView(...viewAround(clamp(view.k / 1.25, ZOOM_MIN, ZOOM_MAX)), .25);
+  else if (e.key === '0') animateView(...viewAround(1));
+  else return;
+  e.preventDefault();
+});
 let penSeen = 0; // dernier signe de vie du stylet (survol ou contact)
 function dropGesture(g) { // abandon d'un geste au doigt resté immobile (la paume posée pendant que le stylet arrive)
   clearTimeout(g.press);
@@ -2833,17 +3029,31 @@ function dropGesture(g) { // abandon d'un geste au doigt resté immobile (la pau
   gesture = null;
 }
 cv.addEventListener('pointerdown', e => {
+  clearTimeout(penEdit);                            // un nouveau contact : le champ promis par un appui au stylet n'ouvre plus (double appui, ou autre geste)
+  if (e.pointerType === 'pen') { // le stylet l'emporte : les contacts posés sont une paume, même prise pour un pincement
+    const P = pinch;
+    if (P && !P.on) { pinch = null; view.k = P.k0; view.x = P.x0; view.y = P.y0; } else if (P) endPinch(P.t + 1000);
+    for (const id of touchPts.keys()) palms.add(id);
+    touchPts.clear();
+  }
   if (e.pointerType === 'pen') penSeen = now();
   else if (e.pointerType === 'touch' && now() - penSeen < .6) return; // paume posée pendant l'écriture au stylet : ignorée
+  if (e.pointerType === 'touch') { touchPts.set(e.pointerId, [e.clientX, e.clientY]); if (startPinch(e)) return; }
+  if (pinch) return;                                // un pincement en cours : un autre contact ne commence rien
+  viewAnim = null; viewVel = null;                  // un appui arrête la vue qui glisse encore
   if (gesture) {
-    const g = gesture, quiet = (g.kind === 'draw' && ink && ink.pts.every(p => Math.hypot(p[0] - ink.pts[0][0], p[1] - ink.pts[0][1]) < 30)) || (g.kind === 'move' && !g.moved) || (g.kind === 'link' && !g.rope) || (g.kind === 'ink' && !g.lifted && g.pts.every(p => Math.hypot(p[0] - g.sx, p[1] - g.sy) < 30)); // une paume bouge à peine
+    const g = gesture, quiet = (g.kind === 'draw' && ink && ink.pts.every(p => Math.hypot(p[0] - ink.pts[0][0], p[1] - ink.pts[0][1]) < scr(30))) || (g.kind === 'move' && !g.moved) || (g.kind === 'link' && !g.rope) || (g.kind === 'ink' && !g.lifted && g.pts.every(p => Math.hypot(p[0] - g.sx, p[1] - g.sy) < scr(30))); // une paume bouge à peine
     if (e.pointerType !== 'touch' && g.pointerType === e.pointerType) // un stylet ou une souris n'a qu'un contact : le lever du geste précédent s'est perdu
-      endGesture({ pointerId: g.id, pointerType: g.pointerType, clientX: g.lx ?? g.sx ?? e.clientX, clientY: g.ly ?? g.sy ?? e.clientY, timeStamp: e.timeStamp }, false);
+      endGesture({ pointerId: g.id, pointerType: g.pointerType, clientX: g.lx ?? (g.sx != null ? toSX(g.sx) : e.clientX), clientY: g.ly ?? (g.sy != null ? toSY(g.sy) : e.clientY), timeStamp: e.timeStamp }, false);
     else if (e.pointerType === 'pen' && g.pointerType === 'touch' && quiet) dropGesture(g); // le stylet a la priorité sur une paume
     else return;
   }
-  const x = e.clientX, y = e.clientY;
+  const ex = e.clientX, ey = e.clientY, x = toWX(ex), y = toWY(ey);
   inputType = e.pointerType;
+  if (editing && field.style.pointerEvents === 'none' && !inShape(editing, x, y)) { // appui passé à travers le champ, hors de la forme : comme sur le champ, il termine la saisie
+    const r = field.getBoundingClientRect();
+    if (ex >= r.left && ex <= r.right && ey >= r.top && ey <= r.bottom) { endEdit(); if (focused) focus(null); lastTap = null; return; }
+  }
   endEdit();                                       // toucher la scène valide le texte en cours
   const hit = inkAt(x, y), word = hit && !(pending && pending.word === hit) ? hit : null; // croix en attente sur ce mot : on trace, on ne le saisit pas
   if (word || writeMode) { // un mot manuscrit (le soulever), ou l'écriture libre (un nouveau trait)
@@ -2853,19 +3063,19 @@ cv.addEventListener('pointerdown', e => {
     else if (!word && e.pointerType === 'pen') g.press = setTimeout(() => holdToggle(g), HOLD_WRITE * 1000); // stylet maintenu sur le fond : l'écriture se termine
     wake(); return;
   }
-  const onTurn = source && turnHit(source, x, y), bead = source && !onTurn && beadAt(source, x, y), opt = source && !onTurn && !bead && optAt(source, x, y);
+  const onTurn = source && turnHit(source, ex, ey), bead = source && !onTurn && beadAt(source, ex, ey), opt = source && !onTurn && !bead && optAt(source, ex, ey);
   if (bead || opt) { // bille : elle déplie ou replie ses choix ; choix : il s'applique à la cellule qui tremble
     cv.setPointerCapture(e.pointerId); hover = null;
-    gesture = { kind: 'dye', id: e.pointerId, pointerType: e.pointerType };
+    gesture = { kind: 'dye', id: e.pointerId, pointerType: e.pointerType, t0: e.timeStamp / 1000, bead: bead && bead.tool, wasOpen: (toolState(source) || {}).open || null };
     if (bead) toggleTool(source, bead.tool, now());
-    else if (opt.tool === 'color') applyPigment(source, opt.i, Math.atan2(opt.y - source.y, opt.x - source.x), now());
-    else applyText(source, opt.tool, opt.i, Math.atan2(opt.y - source.y, opt.x - source.x), now());
+    else if (opt.tool === 'color') applyPigment(source, opt.i, Math.atan2(opt.y - toSY(source.y), opt.x - toSX(source.x)), now());
+    else applyText(source, opt.tool, opt.i, Math.atan2(opt.y - toSY(source.y), opt.x - toSX(source.x)), now());
     return;
   }
-  if (source && turnHit(source, x, y)) { // poignée de la cellule choisie : elle tourne avec le doigt
+  if (source && turnHit(source, ex, ey)) { // poignée de la cellule choisie : elle tourne avec le doigt
     const c = source;
     cv.setPointerCapture(e.pointerId); hover = null;
-    gesture = { kind: 'turn', cell: c, id: e.pointerId, pointerType: e.pointerType, a: Math.atan2(y - c.y, x - c.x), raw: turner && turner.c === c ? turner.target : c.turn || 0 };
+    gesture = { kind: 'turn', cell: c, id: e.pointerId, pointerType: e.pointerType, t0: e.timeStamp / 1000, turn0: c.turn || 0, a: Math.atan2(y - c.y, x - c.x), raw: turner && turner.c === c ? turner.target : c.turn || 0 };
     if (!turner || turner.c !== c) { // déjà calée droite : elle part calée, sans nouveau déclic
       const base = c.kind === 'arrow' ? c.th : 0, vis = (c.turn || 0) + base, q = Math.round(vis / (Math.PI / 2)) * Math.PI / 2;
       turner = { c, target: c.turn || 0, e: 0, v: 0, snap: Math.abs(vis - q) < 1e-3 ? q : null };
@@ -2874,21 +3084,22 @@ cv.addEventListener('pointerdown', e => {
     wake(); return;
   }
   // croix en attente : un appui sur la cellule visée commence le second trait au lieu de la déplacer ou de la relier
-  let z = pending && !pending.shaft && pending.k.cell && inBox(pending.k.cell, x, y, 24) ? null : zoneOf(x, y);
+  let z = pending && !pending.shaft && pending.k.cell && inBox(pending.k.cell, x, y, scr(24)) ? null : zoneOf(x, y);
   const lt = lastTap; // second appui d'un double appui : la même cellule, même posé un peu à côté ou sur son bord
-  if (lt && e.timeStamp / 1000 - lt.t < DBL_TAP && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < 32 && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
+  if (lt && e.timeStamp / 1000 - lt.t < DBL_TAP && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < scr(32) && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
   cv.setPointerCapture(e.pointerId);
   hover = null;
   if (z && z.part === 'body') {
     cells.splice(cells.indexOf(z.c), 1); cells.push(z.c); // la cellule saisie passe au premier plan
-    gesture = { kind: 'move', cell: z.c, id: e.pointerId, gx: x - z.c.x, gy: y - z.c.y, sx: x, sy: y, moved: false, family: z.c === source }; // la cellule qui tremble emmène sa descendance
+    gesture = { kind: 'move', cell: z.c, id: e.pointerId, gx: x - z.c.x, gy: y - z.c.y, sx: x, sy: y, x0: z.c.x, y0: z.c.y, moved: false, family: z.c === source }; // la cellule qui tremble emmène sa descendance
     cv.style.cursor = 'grabbing';
   } else if (z) {
     gesture = { kind: 'link', cell: z.c, id: e.pointerId, sx: x, sy: y, x, y, rope: null, target: null, bud: z.part === 'bud' };
   } else {
-    if (source) select(null);              // toucher le fond met fin au choix de taille
-    if (focused) focus(null);              // et éteint la descendance allumée
-    gesture = { kind: 'draw', id: e.pointerId };
+    const later = e.pointerType === 'touch'; // au doigt, ce peut être le début d'un pincement : on attend le trait ou le lever
+    if (!later && source) select(null);    // toucher le fond met fin au choix de taille
+    if (!later && focused) focus(null);    // et éteint la descendance allumée
+    gesture = { kind: 'draw', id: e.pointerId, unselect: later };
     ink = { pts: [[x, y]], fade: null };
     if (pending) clearTimeout(pending.timer);  // le second trait a commencé à temps : on le laisse finir
   }
@@ -2898,6 +3109,8 @@ cv.addEventListener('pointerdown', e => {
   wake();
 });
 cv.addEventListener('pointermove', e => {
+  if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) touchPts.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pinch) { if (pinch.ids.includes(e.pointerId)) movePinch(e.timeStamp); return; }
   const g = gesture;
   if (g && e.pointerId === g.id) { g.lx = e.clientX; g.ly = e.clientY; } // dernière position, si le lever se perd
   if (e.pointerType === 'pen') penSeen = now();
@@ -2906,35 +3119,36 @@ cv.addEventListener('pointermove', e => {
     if (e.pointerType === 'touch') return;
     const th = !!source && turnHit(source, e.clientX, e.clientY), vs = !!source && (!!beadAt(source, e.clientX, e.clientY) || !!optAt(source, e.clientX, e.clientY));
     if (th !== turnHover) { turnHover = th; wake(); }
-    const z = th || vs ? null : zoneOf(e.clientX, e.clientY), w = inkAt(e.clientX, e.clientY);
+    const wx = toWX(e.clientX), wy = toWY(e.clientY), z = th || vs ? null : zoneOf(wx, wy), w = inkAt(wx, wy);
     cv.style.cursor = w ? 'grab' : writeMode ? 'crosshair' : vs ? 'pointer' : th ? 'grab' : !z ? 'default' : z.part === 'body' ? 'grab' : z.part === 'bud' ? 'pointer' : 'crosshair';
     if (writeMode) { if (hover) { hover = null; wake(); } return; } // en écriture, les cellules ne réagissent pas au survol
     if ((z && z.c) !== (hover && hover.c) || (z && z.part) !== (hover && hover.part)) { hover = z; wake(); }
     return;
   }
   if (e.pointerId !== g.id || (g.consumed && !g.family)) return;
-  const x = e.clientX, y = e.clientY;
+  const x = toWX(e.clientX), y = toWY(e.clientY);
   if (g.kind === 'draw') {
-    if (g.press && Math.hypot(x - g.sx, y - g.sy) > 6) { clearTimeout(g.press); g.press = 0; } // il dessine : pas d'appui maintenu
+    if (g.press && Math.hypot(x - g.sx, y - g.sy) > scr(6)) { clearTimeout(g.press); g.press = 0; } // il dessine : pas d'appui maintenu
+    if (g.unselect && Math.hypot(x - ink.pts[0][0], y - ink.pts[0][1]) > scr(6)) { g.unselect = false; if (source) select(null); if (focused) focus(null); }
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of evs.length ? evs : [e]) {
-      const last = ink.pts[ink.pts.length - 1];
-      if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) >= 2) { ink.pts.push([ev.clientX, ev.clientY]); markCuts(last, [ev.clientX, ev.clientY]); }
+      const last = ink.pts[ink.pts.length - 1], q = [toWX(ev.clientX), toWY(ev.clientY)];
+      if (Math.hypot(q[0] - last[0], q[1] - last[1]) >= scr(2)) { ink.pts.push(q); markCuts(last, q); }
     }
   } else if (g.kind === 'ink') {
-    if (!g.lifted && g.grp && !writeMode && Math.hypot(x - g.sx, y - g.sy) > 3) liftInk(g); // hors écriture, le mot part tout de suite
+    if (!g.lifted && g.grp && !writeMode && Math.hypot(x - g.sx, y - g.sy) > scr(3)) liftInk(g); // hors écriture, le mot part tout de suite
     if (g.lifted) { g.grp.dx = x - g.sx; g.grp.dy = y - g.sy; inkTarget = inkDrop(x, y); }
     else if (writeMode) {
-      if (Math.hypot(x - g.sx, y - g.sy) > 6) clearTimeout(g.press);  // il écrit : ce n'est pas un appui maintenu
+      if (Math.hypot(x - g.sx, y - g.sy) > scr(6)) clearTimeout(g.press);  // il écrit : ce n'est pas un appui maintenu
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
-      for (const ev of evs.length ? evs : [e]) { const last = g.pts[g.pts.length - 1]; if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) >= 1.5) g.pts.push([ev.clientX, ev.clientY, Math.round(ev.timeStamp - g.ts0)]); }
+      for (const ev of evs.length ? evs : [e]) { const last = g.pts[g.pts.length - 1], qx = toWX(ev.clientX), qy = toWY(ev.clientY); if (Math.hypot(qx - last[0], qy - last[1]) >= scr(1.5)) g.pts.push([qx, qy, Math.round(ev.timeStamp - g.ts0)]); }
     }
   } else if (g.kind === 'dye') { // la goutte est bue au posé : rien à suivre
   } else if (g.kind === 'turn') {
     turnAim(g, x, y);
   } else if (g.kind === 'move') {
     // au doigt ou au stylet, un léger glissement pendant l'appui long ne le fait pas échouer
-    if (!g.moved && Math.hypot(x - g.sx, y - g.sy) < (g.pointerType === 'mouse' || g.consumed || g.family ? 3 : 10)) return;
+    if (!g.moved && Math.hypot(x - g.sx, y - g.sy) < scr(g.pointerType === 'mouse' || ((g.consumed || g.family) && g.pointerType !== 'touch') ? 3 : 10)) return; // au doigt, 10 px : un pincement peut encore commencer
     const c = g.cell, first = !g.moved;
     if (!g.moved) { // la cellule suit le doigt ; l'aimant peut la caler sur un lien droit
       g.moved = true; clearTimeout(g.press);
@@ -2945,14 +3159,14 @@ cv.addEventListener('pointermove', e => {
         mag.gset = new Set(mag.group.map(([d]) => d));
       }
     }
-    const [l, r, t, b] = c.ext;
-    mag.rx = clamp(x - g.gx, l + 8, W - r - 8);
-    mag.ry = clamp(y - g.gy, barBottom() + t + 12, Hh - b - 8);
+    const [l, r, t, b] = c.ext, V = viewBox();     // elle reste dans la partie visible, si elle y tient
+    mag.rx = V.r - V.l > l + r + scr(16) ? clamp(x - g.gx, V.l + l + scr(8), V.r - r - scr(8)) : x - g.gx;
+    mag.ry = V.b - V.t > t + b + scr(20) ? clamp(y - g.gy, V.t + t + scr(12), V.b - b - scr(8)) : y - g.gy;
     if (first) { mag.ex = c.x - mag.rx; mag.ey = c.y - mag.ry; } // pas de saut au départ : le ressort rattrape le doigt
   } else {
     g.x = x; g.y = y;
     if (!g.rope) {
-      if (Math.hypot(x - g.sx, y - g.sy) < (g.pointerType === 'mouse' ? 4 : 8)) return; // un appui au stylet ou au doigt glisse un peu sans tirer de lien
+      if (Math.hypot(x - g.sx, y - g.sy) < scr(g.pointerType === 'mouse' ? 4 : 8)) return; // un appui au stylet ou au doigt glisse un peu sans tirer de lien
       clearTimeout(g.press);
       // naissance du connecteur : la membrane d'origine ondule depuis le point de départ
       const A = anchor(g.cell, g, now());
@@ -2968,8 +3182,10 @@ function cellTap(c, t0, t1, x, y, t) { // appui court : la cellule et sa descend
   if (lastTap && lastTap.c === c && t0 - lastTap.t < DBL_TAP) { focus(lastTap.was); lastTap = null; budOff(c, t); return; } // du lever du premier au posé du second ; le premier ne compte pas
   lastTap = { c, t: t1, x, y, was: focused };
   focus(c);                                        // la lignée s'allume
-  if (inputType !== 'pen') startEdit(c);           // et le champ s'ouvre ; au stylet, le texte s'écrit à la main et un champ gênerait le double appui
+  if (inputType !== 'pen') startEdit(c);           // et le champ s'ouvre
+  else { clearTimeout(penEdit); penEdit = setTimeout(() => { if (lastTap && lastTap.c === c && active(c)) { inputType = 'pen'; startEdit(c); } }, DBL_TAP * 1000 + 30); } // au stylet, une fois passé le double appui possible : on y écrit à la main (Griffonnage) ou au clavier
 }
+let penEdit = 0;
 function endGesture(e, accept) {
   const g = gesture;
   if (!g || e.pointerId !== g.id) return;
@@ -2977,7 +3193,7 @@ function endGesture(e, accept) {
   const t = now();
   if (g.kind === 'ink') { // mot posé (dans une cellule, ailleurs, ou jeté), ou trait d'écriture ajouté
     if (g.consumed) { wake(); return; }               // appui long qui a ouvert ou fermé l'écriture : pas de trait
-    if (g.lifted) dropInk(g.grp, e.clientX, e.clientY);
+    if (g.lifted) dropInk(g.grp, toWX(e.clientX), toWY(e.clientY));
     else if (writeMode && accept) {
       const k = strokeInfo(g.pts), w = wordBar(k);
       if (inkX && w === inkX.word && t - inkX.t < 3 && crossesWord(inkX.k, k, w)) { eraseWord(w, t, inkX.stroke); fadeInk({ pts: g.pts }, t); inkX = null; }
@@ -2994,6 +3210,7 @@ function endGesture(e, accept) {
   }
   if (tap && accept) { cellTap(g.cell, g.t0, e.timeStamp / 1000, g.sx, g.sy, t); return; }
   if (g.kind === 'draw') {
+    if (g.unselect) { if (source) select(null); if (focused) focus(null); }
     const k = accept ? strokeInfo(ink.pts) : null, ours = links.filter(l => l.cut && !(pending && pending.links.includes(l)));
     if (pending && pending.word && k && crossesWord(pending.k, k, pending.word)) { // second trait de la croix sur un mot manuscrit : il s'efface
       const p = pending; endPending(false);
@@ -3003,7 +3220,7 @@ function endGesture(e, accept) {
       const p = pending; endPending(false);
       for (const l of ours) l.cut = null;
       fadeInk(ink, t); deleteCell(p.k.cell, t);
-    } else if (pending && pending.shaft && accept && arrowCellFrom(arrowFromTwo(pending.ink.pts, ink.pts))) { // la pointe rejoint la hampe en attente : la flèche pousse
+    } else if (pending && pending.shaft && accept && arrowCellFrom(unscaled(arrowFromTwo(scaled(pending.ink.pts), scaled(ink.pts))))) { // la pointe rejoint la hampe en attente : la flèche pousse
       clearTimeout(pending.timer); pending = null;
       ink = null; for (const l of ours) l.cut = null;
     } else {
@@ -3016,7 +3233,7 @@ function endGesture(e, accept) {
       } else if (isBar(k)) { // peut-être le premier trait d'une croix : on attend le second avant de couper quoi que ce soit
         pending = { k, ink, links: ours, timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
         ink = null;
-      } else if (accept && k && !ours.length && k.straight >= .9 && k.L >= 60) { // trait droit sur le fond : peut-être la hampe d'une flèche, il attend sa pointe
+      } else if (accept && k && !ours.length && k.straight >= .9 && k.L >= scr(60)) { // trait droit sur le fond : peut-être la hampe d'une flèche, il attend sa pointe
         pending = { k, ink, links: [], shaft: true, timer: setTimeout(() => { endPending(true); wake(); }, 3000) };
         ink = null;
       } else {
@@ -3045,13 +3262,14 @@ function endGesture(e, accept) {
   wake();
 }
 cv.addEventListener('pointerup', e => {
+  if (e.pointerType === 'touch') { touchPts.delete(e.pointerId); palms.delete(e.pointerId); if (pinch) { if (pinch.ids.includes(e.pointerId)) endPinch(e.timeStamp); return; } }
   // Sur iPad, le griffonnage (Scribble) avale parfois le « posé » du stylet : il ne reste que son « lever ».
   // Un lever sans geste en cours, posé sur une cellule, compte alors comme un appui court.
   if (!gesture && e.pointerType === 'pen' && !source && !writeMode) {
     inputType = 'pen';
-    const x = e.clientX, y = e.clientY, lt = lastTap, t1 = e.timeStamp / 1000;
+    const x = toWX(e.clientX), y = toWY(e.clientY), lt = lastTap, t1 = e.timeStamp / 1000;
     let z = zoneOf(x, y);
-    if (lt && t1 - lt.t < DBL_TAP + .15 && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < 32 && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
+    if (lt && t1 - lt.t < DBL_TAP + .15 && active(lt.c) && Math.hypot(x - lt.x, y - lt.y) < scr(32) && (!z || z.c === lt.c)) z = { c: lt.c, part: 'body' };
     if (z && z.part !== 'bud') cellTap(z.c, t1 - .08, t1, x, y, now()); // posé perdu : on l'estime un instant avant le lever
     return;
   }
@@ -3060,7 +3278,10 @@ cv.addEventListener('pointerup', e => {
 // Le griffonnage d'iPadOS intercepte aussi des contacts du stylet hors des champs de texte : un écouteur
 // tactile qui annule l'action par défaut lui rend la main sur la scène (boutons et barre ne sont pas concernés).
 for (const type of ['touchstart', 'touchmove']) cv.addEventListener(type, e => e.preventDefault(), { passive: false });
-cv.addEventListener('pointercancel', e => endGesture(e, false));
+cv.addEventListener('pointercancel', e => {
+  if (e.pointerType === 'touch') { touchPts.delete(e.pointerId); palms.delete(e.pointerId); if (pinch) { if (pinch.ids.includes(e.pointerId)) endPinch(e.timeStamp); return; } }
+  endGesture(e, false);
+});
 cv.addEventListener('pointerleave', () => { if (!gesture && hover) { hover = null; cv.style.cursor = ''; wake(); } });
 
 /* ---------- Réglages ---------- */
@@ -3129,7 +3350,7 @@ resize(); readColors();
   makeCell(cx, Math.min(Hh - 70, cy + 170), { kind: 'tri', verts: [[0, -61.3], [60, 30.7], [-60, 30.7]] });
   wake();
 })();
-window.__lab = { inks, inkLines, joinLines, ringLayout, effHue, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
+window.__lab = { view, setView(k, x, y) { view.k = k; view.x = x; view.y = y; wake(); }, toWX, toWY, toSX, toSY, inks, inkLines, joinLines, ringLayout, effHue, get writeMode() { return writeMode; }, turnHandle, get turner() { return turner; }, cells, links, ropes, opt, classify, unloop, dents, cusps, uTurns, cornerness, resample, arrowFromStroke, arrowFromTwo, zoneOf, encoche, motherOf, descendants, toggleFold, strokeInfo, isBar, crossesAsX, get pending() { return pending; }, get hover() { return hover; },
                  get gesture() { return gesture; }, get focused() { return focused; }, get source() { return source; }, get idle() { return !raf; } };
 
 /* ---------- Plein écran ----------

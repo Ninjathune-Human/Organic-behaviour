@@ -1630,19 +1630,32 @@ function magnet(dt, dragging, deferred) {
    mouvement amorti ; elle s'en libère quand on continue de tourner. */
 let turner = null, turnHover = false;
 function spinTo(c, a) { spin(c, a - (c.turn || 0)); c.turn = a; }
+function toolCenter(c) { // centre du cercle des outils : le milieu du cadre de la forme (une flèche n'est pas centrée sur son noyau)
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < c.n; i++) { x0 = Math.min(x0, c.bx[i]); x1 = Math.max(x1, c.bx[i]); y0 = Math.min(y0, c.by[i]); y1 = Math.max(y1, c.by[i]); }
+  const s = scaleOf(c);
+  return { x: c.x + (x0 + x1) / 2 * s, y: c.y + (y0 + y1) / 2 * s, ox: (x0 + x1) / 2, oy: (y0 + y1) / 2 };
+}
 function toolRadius(c) { // cercle imaginaire des outils : il entoure la forme, à distance constante, et suit en douceur quand elle grandit
-  let R0 = 0; for (let i = 0; i < c.n; i++) R0 = Math.max(R0, Math.hypot(c.bx[i], c.by[i]));
+  const O = toolCenter(c);
+  let R0 = 0; for (let i = 0; i < c.n; i++) R0 = Math.max(R0, Math.hypot(c.bx[i] - O.ox, c.by[i] - O.oy));
   const R = R0 * scaleOf(c) + VES_GAP, t = now();
   if (c.ringR == null || reduce || t - c.ringT > .5) c.ringR = R;
   else if (t > c.ringT) c.ringR += (R - c.ringR) * (1 - Math.exp(-(t - c.ringT) * 9));
   c.ringT = t;
   return c.ringR;
 }
-function turnHandle(c) { // marques de rotation : sur le cercle des outils, dans la direction du coin haut-droit, qui tourne avec la forme
+function turnBase(c) { // direction du coin haut-droit, vue du centre du cercle des outils ; elle tourne avec la forme
   if (c.kind === 'circle' || !c.ext0) return null;  // un rond tourné reste le même rond : pas de poignée
   const s = scaleOf(c), a = c.turn || 0, C = Math.cos(a), S = Math.sin(a), lx = c.ext0[1] * s, ly = -c.ext0[2] * s;
-  const ang = Math.atan2(lx * S + ly * C, lx * C - ly * S), R = toolRadius(c) - 11; // les deux arcs encadrent le cercle
-  return { x: c.x + Math.cos(ang) * R, y: c.y + Math.sin(ang) * R, dir: ang };
+  const O = toolCenter(c), kx = c.x + lx * C - ly * S, ky = c.y + lx * S + ly * C;
+  return Math.atan2(ky - O.y, kx - O.x);
+}
+function turnHandle(c) { // marques de rotation : sur le cercle des outils, au coin, ou glissées avec les billes quand un bord manque de place
+  const a0 = turnBase(c);
+  if (a0 == null) return null;
+  const ang = c.selected ? toolRing(c).mA : a0, O = toolCenter(c), R = toolRadius(c) - 11;  // les deux arcs encadrent le cercle
+  return { x: O.x + Math.cos(ang) * R, y: O.y + Math.sin(ang) * R, dir: ang };
 }
 function turnHit(c, x, y) { // zone de 44 px autour des marques
   const K = !c.hidden && !c.dying && turnHandle(c);
@@ -1676,22 +1689,25 @@ function turning(dt) {
 const VES_R = 8, VES_GAP = 26, PIGMENTS = 9, CAR_R = 11;
 const TOOLS = ['color', 'font', 'size', 'style'];
 let dyeing = null;                        // goutte en cours d'absorption : { c, i, t0 }
-function toolRing(c, t) { // place des billes : à la suite des marques ; sens choisi à l'éclosion, revu après une rotation
-  const K = turnHandle(c), mA = K ? K.dir : -Math.PI / 4, R = toolRadius(c), V = c.car;  // un rond, sans marques : en haut à droite
-  const beadsAt = dir => TOOLS.map((_, k) => mA + dir * (32 + 30 * k) / R);
-  if (!V || V.key !== c.selT || (Math.abs(angDist(mA, V.mA)) > .3 && !(gesture && gesture.kind === 'turn'))) {
-    const avoid = links.filter(l => (l.a === c || l.b === c) && !l.a.hidden && !l.b.hidden).map(l => { const o = l.a === c ? l.b : l.a; return Math.atan2(o.y - c.y, o.x - c.x); });
-    let best = 1, bs = -Infinity;
-    for (const dir of [1, -1]) {
-      const B = beadsAt(dir), Ro = R + 32, pts = [...B.map(a => [a, R]), ...Array.from({ length: PIGMENTS }, (_, k) => [B[0] + dir * 24 * k / Ro, Ro]), [B[3] + dir * 26 * 3 / (R + 24), R + 74]];
-      const inside = pts.every(([a, r]) => { const x = c.x + Math.cos(a) * r, y = c.y + Math.sin(a) * r; return x > 14 && x < W - 14 && y > barBottom() + 14 && y < Hh - 14; });
-      const hit = avoid.filter(o => B.some(a => Math.abs(angDist(o, a)) < 14 / R + .12)).length;  // bille posée sur un lien
-      const sc = (inside ? 0 : -10) - hit;
-      if (sc > bs + 1e-6) { bs = sc; best = dir; }
+function toolRing(c) { // marques puis billes, partout le même dessin horaire ; l'ensemble ne glisse sur le cercle, au plus près du coin, que si un bord de l'écran le couperait
+  const a0 = turnBase(c), mA0 = a0 ?? -Math.PI / 4, R = toolRadius(c), O = toolCenter(c), V = c.car;  // un rond, sans marques : en haut à droite
+  const beadsAt = mA => TOOLS.map((_, k) => mA + (32 + 30 * k) / R);
+  if (!V || V.key !== c.selT || (Math.abs(angDist(mA0, V.mA0)) > .3 && !(gesture && gesture.kind === 'turn'))) {
+    const seen = pts => pts.filter(([a, r]) => { const x = O.x + Math.cos(a) * r, y = O.y + Math.sin(a) * r; return x > 14 && x < W - 14 && y > barBottom() + 14 && y < Hh - 14; }).length;
+    const fan = (k, b, d) => k ? Array.from({ length: optLabels(TOOLS[k]).length }, (_, i) => [b + d * 26 * i / (R + 24), R + 74])   // pétales
+                               : Array.from({ length: PIGMENTS }, (_, i) => [b + d * 24 * i / (R + 32), R + 32]);                // gouttes
+    let slide = 0, bs = -Infinity;
+    for (let k = 0; k <= 72 && bs < 0; k++) {                      // de 5° en 5°, d'un côté puis de l'autre : le premier qui convient
+      const d = (k % 2 ? -1 : 1) * Math.ceil(k / 2) * 5 * DEG, B = beadsAt(mA0 + d);
+      const pts = B.map(a => [a, R]); if (a0 != null) pts.push([mA0 + d, R - 11]);
+      const sc = seen(pts) - pts.length;                              // 0 : tout est à l'écran ; une voisine ou un lien dessous ne gênent pas, les billes passent au-dessus
+      if (sc > bs) { bs = sc; slide = d; }
     }
-    c.car = { key: c.selT, mA, dir: best };
+    const B = beadsAt(mA0 + slide), od = B.map((b, k) => seen(fan(k, b, 1)) >= seen(fan(k, b, -1)) ? 1 : -1);  // des choix qui sortiraient de l'écran se déplient de l'autre côté de leur bille
+    c.car = { key: c.selT, mA0, slide, od };
   }
-  return { mA, R, dir: c.car.dir, B: beadsAt(c.car.dir) };
+  const mA = mA0 + c.car.slide;
+  return { mA, R, O, od: c.car.od, B: beadsAt(mA) };
 }
 function toolState(c) { return c.tools && c.tools.key === c.selT ? c.tools : null; }
 function optLabels(tool) { // libellé et police de chaque choix : le mot s'écrit dans le style qu'il propose
@@ -1715,9 +1731,9 @@ function unfoldU(c, tool, k, n, t) { // avancée du dépliement du k-ième choix
   return 0;
 }
 function ringLayout(c, t) { // billes, puis choix de la bille dépliée (ou qui se replie)
-  const T = toolRing(c, t), ip = reduce ? 1 : clamp((t - (c.selT || 0) - .1) / .3, 0, 1);
+  const T = toolRing(c), ip = reduce ? 1 : clamp((t - (c.selT || 0) - .1) / .3, 0, 1);
   const beads = TOOLS.map((tool, k) => { const p = clamp(ip * 1.4 - k * .12, 0, 1), a = T.B[k];
-    return { tool, a, x: c.x + Math.cos(a) * T.R, y: c.y + Math.sin(a) * T.R, r: CAR_R * (p >= 1 ? 1 : Math.max(0, backOut(p))) }; });
+    return { tool, a, x: T.O.x + Math.cos(a) * T.R, y: T.O.y + Math.sin(a) * T.R, r: CAR_R * (p >= 1 ? 1 : Math.max(0, backOut(p))) }; });
   const opts = [];
   for (const [k, tool] of TOOLS.entries()) {
     const b = T.B[k], labels = optLabels(tool), n = labels ? labels.length : PIGMENTS;
@@ -1728,21 +1744,21 @@ function ringLayout(c, t) { // billes, puis choix de la bille dépliée (ou qui 
       if (u <= 0) continue;
       const S = toolState(c), e = u >= 1 ? 1 : S.open === tool ? backOut(u) : u * u * (3 - 2 * u);
       if (tool === 'color') { // gouttes, sur un cercle extérieur
-        const Ro = T.R + 32, a = b + T.dir * 24 * i / Ro, aa = b + (a - b) * e, rr = T.R + (Ro - T.R) * Math.min(1, e);
-        let x = c.x + Math.cos(aa) * rr, y = c.y + Math.sin(aa) * rr, r = VES_R * (.35 + .65 * Math.min(1, e));
+        const Ro = T.R + 32, a = b + T.od[k] * 24 * i / Ro, aa = b + (a - b) * e, rr = T.R + (Ro - T.R) * Math.min(1, e);
+        let x = T.O.x + Math.cos(aa) * rr, y = T.O.y + Math.sin(aa) * rr, r = VES_R * (.35 + .65 * Math.min(1, e));
         if (dyeing && dyeing.c === c && dyeing.i === i && u >= 1) { // absorbée par la membrane, puis elle repousse à sa place
           const q = t - dyeing.t0;
-          if (q < .3) { const f = q / .3, P = pointAtAngle(c, a, t); x += (P.x - x) * f * f; y += (P.y - y) * f * f; r *= 1 - f * f; }
+          if (q < .3) { const f = q / .3, P = pointAtAngle(c, Math.atan2(y - c.y, x - c.x), t); x += (P.x - x) * f * f; y += (P.y - y) * f * f; r *= 1 - f * f; }
           else if (q < .7) r = 0;
           else r *= Math.min(1, Math.max(0, backOut(clamp((q - .75) / .35, 0, 1))));
         }
         opts.push({ tool, i, a, x, y, r, u, kind: 'drop' });
       } else { // pétales : un mot qui rayonne, perpendiculaire à la tangente
-        const Ri = T.R + 24, a = b + T.dir * 26 * i / Ri, aa = b + (a - b) * e;
+        const Ri = T.R + 24, a = b + T.od[k] * 26 * i / Ri, aa = b + (a - b) * e;
         ctx.font = labels[i].font;
         const len = Math.max(30, ctx.measureText(labels[i].text).width + 18), rc = Ri + len / 2;
         const rr = T.R + (rc - T.R) * Math.min(1, e), sc = .35 + .65 * Math.min(1, e);
-        opts.push({ tool, i, a, x: c.x + Math.cos(aa) * rr, y: c.y + Math.sin(aa) * rr, ang: aa, len: len * sc, th: 22 * sc, u, kind: 'petal', label: labels[i] });
+        opts.push({ tool, i, a, x: T.O.x + Math.cos(aa) * rr, y: T.O.y + Math.sin(aa) * rr, ang: aa, len: len * sc, th: 22 * sc, u, kind: 'petal', label: labels[i] });
       }
     }
     ctx.restore();
@@ -1823,7 +1839,7 @@ function drawTools(c, t) {
     ctx.fillStyle = colors.cell; ctx.fill(); ctx.strokeStyle = open ? colors.glow : colors.membrane; ctx.lineWidth = 1.25; ctx.stroke();
     drawBeadIcon(c, b);
     const g = S && (S.open === b.tool || S.last === b.tool) ? clamp((t - S.t0) / .3, 0, 1) : 0, flip = open ? g : S && S.last === b.tool ? 1 - g : 0;
-    const rr = T.R + b.r + 5, cx = c.x + Math.cos(b.a) * rr, cy = c.y + Math.sin(b.a) * rr;
+    const rr = T.R + b.r + 5, cx = T.O.x + Math.cos(b.a) * rr, cy = T.O.y + Math.sin(b.a) * rr;
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(b.a + Math.PI * flip); ctx.globalAlpha = b.r / CAR_R;
     ctx.beginPath(); ctx.moveTo(-1.2, -3); ctx.lineTo(1.6, 0); ctx.lineTo(-1.2, 3);
     ctx.strokeStyle = colors.membrane; ctx.lineWidth = 1.4; ctx.lineCap = ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
@@ -2842,8 +2858,8 @@ cv.addEventListener('pointerdown', e => {
     cv.setPointerCapture(e.pointerId); hover = null;
     gesture = { kind: 'dye', id: e.pointerId, pointerType: e.pointerType };
     if (bead) toggleTool(source, bead.tool, now());
-    else if (opt.tool === 'color') applyPigment(source, opt.i, opt.a, now());
-    else applyText(source, opt.tool, opt.i, opt.a, now());
+    else if (opt.tool === 'color') applyPigment(source, opt.i, Math.atan2(opt.y - source.y, opt.x - source.x), now());
+    else applyText(source, opt.tool, opt.i, Math.atan2(opt.y - source.y, opt.x - source.x), now());
     return;
   }
   if (source && turnHit(source, x, y)) { // poignée de la cellule choisie : elle tourne avec le doigt

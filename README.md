@@ -1,4 +1,4 @@
-![CalcFlow](banniere.png)
+![CalcFlow](banner.png)
 
 # CalcFlow
 

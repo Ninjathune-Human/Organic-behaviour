@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@200..600&display=swap">
 <style>
 /* CalcFlow : feuille de calcul libre façon Tydlig, habillage de la Calculatrice Apple.
-   Mise en page : feuille en haut, clavier capsule en bas (50 % de l'écran) ; clavier à droite en paysage. */
+   Mise en page : feuille en haut, clavier capsule en bas (40 % de l'écran sur iPhone, 33 % sur iPad) ; clavier à droite en paysage. */
 :root{
   color-scheme:dark;
   --bg:#000;
@@ -38,9 +38,10 @@ button{font:inherit;color:inherit}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* ---------- Structure ---------- */
-#app{height:100%;display:grid;grid-template:"bar" auto "canvas" minmax(0,1fr) "kbd" 50% / minmax(0,1fr);
+#app{height:100%;display:grid;grid-template:"bar" auto "canvas" minmax(0,1fr) "kbd" 40% / minmax(0,1fr);
   padding-inline:env(safe-area-inset-left,0px) env(safe-area-inset-right,0px)}
-body.regular:not(.side) #app{grid-template-rows:auto minmax(0,1fr) 55%}
+body.regular:not(.side) #app{grid-template-rows:auto minmax(0,1fr) 33%}
+body.regular.fxopen:not(.side) #app{grid-template-rows:auto minmax(0,1fr) auto} /* volet fx : le clavier grandit, la feuille se réduit */
 body.side #app{grid-template:"bar kbd" auto "canvas kbd" minmax(0,1fr) / minmax(0,1fr) var(--kw)}
 
 .bar{grid-area:bar;display:flex;align-items:center;justify-content:space-between;padding:6px 16px 2px}
@@ -1813,8 +1814,10 @@ function layout() {
   const g = c ? 10 : 12;
   kbd.style.setProperty('--g', g + 'px');
   const open = !c && layer === 'fx', cols = open ? 5 : 4; // iPad : 5 rangées, 9 avec le volet fx
-  const cs = getComputedStyle(kbd), rows = open ? 9 : 5;
-  const H = kbd.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  cl.toggle('fxopen', open);
+  const cs = getComputedStyle(kbd), pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const port = !c && !s, rows = open && !port ? 9 : 5; // iPad portrait : touches réglées sur le tiers d'écran, le volet s'ajoute au-dessus
+  const H = (port ? h * .33 : kbd.clientHeight) - pad;
   let rh = (H - (rows - 1) * g) / rows;
   if (!c) { const W = kbd.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); rh = Math.min(rh, (W - (cols - 1) * g) / cols * .86); }
   kbd.style.setProperty('--rh', Math.max(34, Math.floor(rh)) + 'px');
